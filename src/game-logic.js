@@ -33,7 +33,7 @@ export function getAvailableCategories(wordCategories) {
   for (const cat of Object.values(wordCategories)) {
     counts[cat] = (counts[cat] || 0) + 1;
   }
-  const skip = new Set(['other', 'general', 'name']);
+  const skip = new Set(['other', 'general', 'name', 'noun', 'verb', 'adjective']);
   return Object.entries(counts)
     .filter(([cat, count]) => count >= 30 && !skip.has(cat))
     .sort((a, b) => b[1] - a[1])
