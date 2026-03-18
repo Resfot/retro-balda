@@ -26,6 +26,13 @@ const CHALLENGE_PENALTY = 3;
 const MIXED_ROTATE_MIN = 2;
 const MIXED_ROTATE_MAX = 3;
 
+const TIMER_OPTIONS = [
+  { id: 0, label: 'Выкл', emoji: '♾️' },
+  { id: 30, label: '30с', emoji: '⚡' },
+  { id: 60, label: '60с', emoji: '⏱️' },
+  { id: 90, label: '90с', emoji: '🐢' },
+];
+
 export default function App() {
   const [screen, setScreen] = useState('menu');
   const [dictionary, setDictionary] = useState(null);
@@ -39,6 +46,7 @@ export default function App() {
   const [difficulty, setDifficulty] = useState('medium');
   const [gameMode, setGameMode] = useState('classic');
   const [selectedCategory, setSelectedCategory] = useState(null);
+  const [turnTime, setTurnTime] = useState(0); // 0 = off, seconds
 
   // Game state
   const [grid, setGrid] = useState(null);
@@ -82,6 +90,10 @@ export default function App() {
   });
   const [earnMessage, setEarnMessage] = useState(null); // { text, amount }
 
+  // Timer state
+  const [timeLeft, setTimeLeft] = useState(0);
+  const timerRef = useRef(null);
+
   // Persist currency
   useEffect(() => {
     try { localStorage.setItem('balda_currency', String(currency)); } catch {}
@@ -93,6 +105,89 @@ export default function App() {
       earnCurrency(REWARD_WIN, 'Победа!');
     }
   }, [phase]);
+
+  // Timer — countdown during player's turn
+  const resetTimer = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = null;
+    if (turnTime > 0) setTimeLeft(turnTime);
+  }, [turnTime]);
+
+  useEffect(() => {
+    // Only tick during player's active turn
+    if (turnTime <= 0) return;
+    if (currentPlayer !== 1) return;
+    if (phase !== 'place' && phase !== 'trace') return;
+
+    setTimeLeft(turnTime);
+    timerRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = null;
+    };
+  }, [currentPlayer, phase === 'place' || phase === 'trace' ? 'active' : 'inactive', turnTime]);
+
+  // Auto-pass when timer hits 0
+  const autoPassRef = useRef(null);
+  autoPassRef.current = () => {
+    if (currentPlayer === 1 && (phase === 'place' || phase === 'trace')) {
+      setMessage('⏰ Время вышло!');
+      // Undo placement if in trace phase
+      if (placedCell) {
+        const newGrid = grid.map(r => [...r]);
+        newGrid[placedCell[0]][placedCell[1]] = '';
+        setGrid(newGrid);
+      }
+      setPlacedCell(null);
+      setPlacedLetter('');
+      setSelectedPath([]);
+      clearHint();
+
+      let currentScores = scores;
+      if (gameMode === 'challenge') {
+        const newCounters = [...challengeCounters];
+        newCounters[0] += 1;
+        if (newCounters[0] >= CHALLENGE_TURNS) {
+          currentScores = [...scores];
+          currentScores[0] = Math.max(0, currentScores[0] - CHALLENGE_PENALTY);
+          newCounters[0] = 0;
+        }
+        setChallengeCounters(newCounters);
+        setScores(currentScores);
+      }
+
+      const newPassCount = passCount + 1;
+      setPassCount(newPassCount);
+
+      if (newPassCount >= 2) {
+        setPhase('gameOver');
+        setMessage('Игра окончена! Оба игрока спасовали');
+        return;
+      }
+
+      const newTurns = turnsSinceRotate + 1;
+      setTurnsSinceRotate(newTurns);
+      setCurrentPlayer(2);
+      setPhase('aiThinking');
+      setTimeout(() => runAI(grid.map(r => [...r]), usedWords, currentScores, playerWords, newTurns), 800);
+    }
+  };
+
+  useEffect(() => {
+    if (turnTime > 0 && timeLeft === 0 && currentPlayer === 1 && (phase === 'place' || phase === 'trace')) {
+      autoPassRef.current();
+    }
+  }, [timeLeft]);
 
   const gridRef = useRef(null);
 
@@ -596,6 +691,17 @@ export default function App() {
           </div>
 
           <div className="menu-section">
+            <label>Таймер на ход</label>
+            <div className="btn-group">
+              {TIMER_OPTIONS.map(t => (
+                <button key={t.id} className={turnTime === t.id ? 'active' : ''} onClick={() => setTurnTime(t.id)}>
+                  {t.emoji} {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="menu-section">
             <label>Режим игры</label>
             <div className="mode-grid">
               {GAME_MODES.map(m => {
@@ -719,6 +825,11 @@ export default function App() {
         <div className={`message-bar ${phase === 'aiThinking' ? 'thinking' : ''}`}>
           {message}
           {currentTracedWord && <span className="traced-word"> → {currentTracedWord}</span>}
+          {turnTime > 0 && currentPlayer === 1 && (phase === 'place' || phase === 'trace') && (
+            <span className={`timer-badge ${timeLeft <= 10 ? 'timer-danger' : timeLeft <= 20 ? 'timer-warn' : ''}`}>
+              ⏱️ {timeLeft}с
+            </span>
+          )}
         </div>
 
         {/* Grid */}
