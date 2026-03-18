@@ -7,6 +7,8 @@ import {
   findHint
 } from './game-logic';
 import WordInfo from './WordInfo';
+import Lobby from './Lobby';
+import MultiplayerGame from './MultiplayerGame';
 
 const DIFFICULTIES = [
   { id: 'easy', label: 'Легко', emoji: '😊' },
@@ -76,6 +78,10 @@ export default function App() {
   const [hintLevel, setHintLevel] = useState(0); // 0-2 progressive
   const [hintsUsed, setHintsUsed] = useState(0);
   const [showWordInfo, setShowWordInfo] = useState(null);
+
+  // Multiplayer state
+  const [multiRoom, setMultiRoom] = useState(null);
+  const [multiPlayerNumber, setMultiPlayerNumber] = useState(null);
 
   // Currency system (Буквы)
   const HINT_COSTS = [1, 2, 3]; // cost per level
@@ -755,6 +761,13 @@ export default function App() {
             ИГРАТЬ
           </button>
 
+          <button
+            className="btn-play btn-multiplayer"
+            onClick={() => setScreen('lobby')}
+          >
+            🌐 ОНЛАЙН
+          </button>
+
           <div className="rules">
             <h3>Правила:</h3>
             <p>1. Поставьте букву рядом с существующей</p>
@@ -1012,6 +1025,38 @@ export default function App() {
           </div>
         )}
       </div>
+    );
+  }
+
+  if (screen === 'lobby') {
+    return (
+      <Lobby
+        onGameStart={(room, playerNum) => {
+          setMultiRoom(room);
+          setMultiPlayerNumber(playerNum);
+          setScreen('multiplayer');
+        }}
+        onBack={() => setScreen('menu')}
+        wordCategories={wordCategories}
+      />
+    );
+  }
+
+  if (screen === 'multiplayer' && multiRoom) {
+    return (
+      <MultiplayerGame
+        room={multiRoom}
+        playerNumber={multiPlayerNumber}
+        dictionary={dictionary}
+        dictSet={dictSet}
+        wordCategories={wordCategories}
+        availableCategories={availableCategories}
+        onExit={() => {
+          setMultiRoom(null);
+          setMultiPlayerNumber(null);
+          setScreen('lobby');
+        }}
+      />
     );
   }
 
