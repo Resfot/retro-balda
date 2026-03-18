@@ -662,9 +662,16 @@ export default function App() {
   if (loading) {
     return (
       <div className="app loading-screen">
-        <div className="loader">
-          <div className="pixel-spinner" />
-          <p>Загрузка словаря...</p>
+        <div className="window xp-window">
+          <div className="title-bar">
+            <div className="title-bar-text">БАЛДА.exe — Загрузка</div>
+          </div>
+          <div className="window-body">
+            <div className="loader">
+              <div className="pixel-spinner" />
+              <p>Загрузка словаря...</p>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -673,7 +680,17 @@ export default function App() {
   if (screen === 'menu') {
     return (
       <div className="app menu-screen">
-        <div className="menu-container">
+        <div className="window xp-window">
+          <div className="title-bar">
+            <div className="title-bar-text">БАЛДА.exe — Главное меню</div>
+            <div className="title-bar-controls">
+              <button aria-label="Minimize"></button>
+              <button aria-label="Maximize"></button>
+              <button aria-label="Close"></button>
+            </div>
+          </div>
+          <div className="window-body">
+            <div className="menu-container">
           <h1 className="game-title">БАЛДА</h1>
           <p className="subtitle">Ретро-издание</p>
 
@@ -780,6 +797,8 @@ export default function App() {
             {gameMode === 'challenge' && <p className="rule-bonus">🔥 Вызов: {CHALLENGE_TURNS} хода без слова по теме = −{CHALLENGE_PENALTY} очков!</p>}
           </div>
         </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -789,6 +808,16 @@ export default function App() {
 
     return (
       <div className="app game-screen">
+        <div className="window xp-window">
+          <div className="title-bar">
+            <div className="title-bar-text">БАЛДА.exe — Игра</div>
+            <div className="title-bar-controls">
+              <button aria-label="Minimize"></button>
+              <button aria-label="Maximize"></button>
+              <button aria-label="Close" onClick={() => setScreen('menu')}></button>
+            </div>
+          </div>
+          <div className="window-body">
         {/* Active category indicator */}
         {activeCategory && gameMode !== 'classic' && (
           <div className={`category-bar mode-${gameMode}`}>
@@ -1024,6 +1053,8 @@ export default function App() {
             </div>
           </div>
         )}
+          </div>
+        </div>
       </div>
     );
   }

@@ -526,9 +526,16 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
   if (!grid) {
     return (
       <div className="app loading-screen">
-        <div className="loader">
-          <div className="pixel-spinner" />
-          <p>Подключение...</p>
+        <div className="window xp-window">
+          <div className="title-bar">
+            <div className="title-bar-text">БАЛДА.exe — Подключение</div>
+          </div>
+          <div className="window-body">
+            <div className="loader">
+              <div className="pixel-spinner" />
+              <p>Подключение...</p>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -536,6 +543,16 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
 
   return (
     <div className="app game-screen">
+      <div className="window xp-window">
+        <div className="title-bar">
+          <div className="title-bar-text">БАЛДА.exe — Онлайн игра</div>
+          <div className="title-bar-controls">
+            <button aria-label="Minimize"></button>
+            <button aria-label="Maximize"></button>
+            <button aria-label="Close" onClick={onExit}></button>
+          </div>
+        </div>
+        <div className="window-body">
       {/* Category bar */}
       {activeCategory && gameMode !== 'classic' && (
         <div className={`category-bar mode-${gameMode}`}>
@@ -732,6 +749,8 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
           </div>
         </div>
       )}
+        </div>
+      </div>
     </div>
   );
 }
