@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, getPlayerId, getPlayerName, setPlayerName } from './supabase';
+import { isTelegram, shareGame, hapticImpact } from './telegram';
 import { CATEGORY_LABELS, getAvailableCategories } from './game-logic';
 
 const TIMER_OPTIONS = [
@@ -346,11 +347,16 @@ export default function Lobby({ onGameStart, onBack, wordCategories }) {
                 <span className="room-code">{roomId.toUpperCase()}</span>
                 <button
                   className="btn-action"
-                  onClick={() => navigator.clipboard?.writeText(roomId)}
+                  onClick={() => { navigator.clipboard?.writeText(roomId); hapticImpact('light'); }}
                   style={{ fontSize: 12, padding: '4px 10px' }}
                 >
                   📋 Копировать
                 </button>
+                {isTelegram && (
+                  <button className="tg-share-btn" onClick={() => shareGame(roomId)}>
+                    📨 Пригласить в Telegram
+                  </button>
+                )}
               </div>
             )}
             <button className="btn-action" onClick={cancelWaiting} style={{ marginTop: 20 }}>

@@ -9,6 +9,9 @@ import {
 import WordInfo from './WordInfo';
 import Lobby from './Lobby';
 import MultiplayerGame from './MultiplayerGame';
+import { isTelegram, hapticImpact, hapticNotification, hapticSelection, onBackButton, shareInvite, getInviteLink } from './telegram';
+import { initUser, onGameComplete, getReferralStats, syncCurrency, loadCurrency } from './referral';
+import { getPlayerId } from './supabase';
 
 const DIFFICULTIES = [
   { id: 'easy', label: 'Легко', emoji: '😊' },
@@ -83,6 +86,10 @@ export default function App() {
   const [multiRoom, setMultiRoom] = useState(null);
   const [multiPlayerNumber, setMultiPlayerNumber] = useState(null);
 
+  // Referral state
+  const [refStats, setRefStats] = useState({ total: 0, rewarded: 0, pending: 0 });
+  const [referralMessage, setReferralMessage] = useState(null);
+
   // Currency system (Буквы)
   const HINT_COSTS = [1, 2, 3]; // cost per level
   const STARTING_BALANCE = 5;
@@ -105,11 +112,29 @@ export default function App() {
     try { localStorage.setItem('balda_currency', String(currency)); } catch {}
   }, [currency]);
 
-  // Reward for winning
+  // Reward for winning + referral check
   useEffect(() => {
-    if (phase === 'gameOver' && scores[0] > scores[1]) {
+    if (phase !== 'gameOver') return;
+    
+    if (scores[0] > scores[1]) {
       earnCurrency(REWARD_WIN, 'Победа!');
     }
+
+    // Track game completion + check referral reward
+    (async () => {
+      const refReward = await onGameComplete(scores, 1);
+      if (refReward > 0) {
+        setTimeout(() => {
+          setCurrency(prev => prev + refReward);
+          setReferralMessage(`+${refReward} Букв за приглашение!`);
+          hapticNotification('success');
+          setTimeout(() => setReferralMessage(null), 4000);
+        }, 1500);
+      }
+      // Refresh referral stats
+      const stats = await getReferralStats();
+      setRefStats(stats);
+    })();
   }, [phase]);
 
   // Timer — countdown during player's turn
@@ -197,6 +222,17 @@ export default function App() {
 
   const gridRef = useRef(null);
 
+  // Telegram back button
+  useEffect(() => {
+    if (!isTelegram) return;
+    if (screen === 'menu') return;
+    return onBackButton(() => {
+      if (screen === 'game') setScreen('menu');
+      else if (screen === 'lobby') setScreen('menu');
+      else if (screen === 'multiplayer') setScreen('lobby');
+    });
+  }, [screen]);
+
   // Load dictionary — try categorized first, fallback to flat list
   useEffect(() => {
     let loaded = false;
@@ -237,6 +273,25 @@ export default function App() {
           });
       });
   }, []);
+
+  // Initialize user (referral tracking) + load cloud currency
+  useEffect(() => {
+    (async () => {
+      await initUser();
+      const stats = await getReferralStats();
+      setRefStats(stats);
+      // Sync currency from cloud
+      const cloudCurrency = await loadCurrency();
+      if (cloudCurrency !== null && cloudCurrency > currency) {
+        setCurrency(cloudCurrency);
+      }
+    })();
+  }, []);
+
+  // Sync currency to cloud when it changes
+  useEffect(() => {
+    syncCurrency(currency);
+  }, [currency]);
 
   // Start new game
   const startGame = useCallback(() => {
@@ -291,6 +346,7 @@ export default function App() {
 
     if (phase === 'place') {
       if (grid[row][col] !== '' || !hasAdjacentFilled(grid, row, col)) return;
+      hapticSelection();
       setPendingCell([row, col]);
       setShowLetterPicker(true);
     } else if (phase === 'trace') {
@@ -307,12 +363,14 @@ export default function App() {
           if (selectedPath.some(([r, c]) => r === row && c === col)) return;
         }
         setSelectedPath([...selectedPath, [row, col]]);
+        hapticSelection();
       }
     }
   };
 
   const placeLetter = (letter) => {
     if (!pendingCell) return;
+    hapticImpact('medium');
     const [row, col] = pendingCell;
     const newGrid = grid.map(r => [...r]);
     newGrid[row][col] = letter;
@@ -417,10 +475,12 @@ export default function App() {
 
     const result = validateMove(grid, selectedPath, placedCell, usedWords, dictSet);
     if (!result.valid) {
+      hapticNotification('error');
       setMessage(result.reason);
       return;
     }
 
+    hapticNotification('success');
     // Calculate score with category multiplier
     const scoreInfo = calculateScore(result.word, wordCategories, gameMode, activeCategory);
     const newScores = [...scores];
@@ -780,6 +840,46 @@ export default function App() {
             🌐 ОНЛАЙН
           </button>
 
+          {/* Invite Friends Section */}
+          <div className="invite-section">
+            <div className="invite-header">
+              <span className="invite-icon">🎁</span>
+              <div>
+                <span className="invite-title">Пригласи друга — получи 5 Букв!</span>
+                <span className="invite-sub">И друг тоже получит 5 Букв</span>
+              </div>
+            </div>
+            <div className="invite-actions">
+              {isTelegram ? (
+                <button className="invite-btn" onClick={() => {
+                  shareInvite(getPlayerId());
+                  hapticImpact('medium');
+                }}>
+                  📨 Пригласить в Telegram
+                </button>
+              ) : (
+                <button className="invite-btn" onClick={() => {
+                  const link = getInviteLink(getPlayerId());
+                  navigator.clipboard?.writeText(link);
+                  setReferralMessage('Ссылка скопирована!');
+                  setTimeout(() => setReferralMessage(null), 2000);
+                }}>
+                  📋 Скопировать ссылку
+                </button>
+              )}
+              {refStats.total > 0 && (
+                <div className="invite-stats">
+                  <span>👥 Приглашено: {refStats.total}</span>
+                  <span>✅ Играют: {refStats.rewarded}</span>
+                  <span>💰 +{refStats.rewarded * 5} Букв</span>
+                </div>
+              )}
+              {referralMessage && (
+                <div className="invite-reward-msg">{referralMessage}</div>
+              )}
+            </div>
+          </div>
+
           <div className="rules">
             <h3>Правила:</h3>
             <p>1. Поставьте букву рядом с существующей</p>
@@ -851,6 +951,15 @@ export default function App() {
             <span className="currency-earn" key={Date.now()}>
               +{earnMessage.amount} {earnMessage.text}
             </span>
+          )}
+          {isTelegram && currency < 3 && (
+            <button className="buy-bukvy-btn" onClick={async () => {
+              const { buyBukvyWithStars } = await import('./telegram');
+              const bought = await buyBukvyWithStars(10, 1);
+              if (bought) { setCurrency(prev => prev + 10); hapticNotification('success'); }
+            }}>
+              +10 за 1⭐
+            </button>
           )}
         </div>
 

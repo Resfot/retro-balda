@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { getPlayerIdTG, getPlayerNameTG } from './telegram';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_KEY;
@@ -11,18 +12,13 @@ export const supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey)
   : null;
 
-// Player ID — persistent per browser
+// Player ID — uses Telegram ID when available, localStorage fallback
 export function getPlayerId() {
-  let id = localStorage.getItem('balda_player_id');
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem('balda_player_id', id);
-  }
-  return id;
+  return getPlayerIdTG();
 }
 
 export function getPlayerName() {
-  return localStorage.getItem('balda_player_name') || 'Игрок';
+  return getPlayerNameTG();
 }
 
 export function setPlayerName(name) {
