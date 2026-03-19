@@ -179,14 +179,12 @@ export default function Lobby({ onGameStart, onBack, wordCategories }) {
   if (!supabase) {
     return (
       <div className="app menu-screen">
-        <div className="window xp-window">
-          <div className="title-bar">
-            <div className="title-bar-text">БАЛДА.exe — Ошибка</div>
-            <div className="title-bar-controls">
-              <button aria-label="Close" onClick={onBack}></button>
-            </div>
+        <div className="game-panel">
+          <div className="panel-header">
+            <span className="panel-title">Ошибка</span>
+            <button className="panel-close" onClick={onBack}>✕</button>
           </div>
-          <div className="window-body">
+          <div className="panel-body">
             <h2>Мультиплеер недоступен</h2>
             <p className="subtitle">Настройте VITE_SUPABASE_URL и VITE_SUPABASE_KEY</p>
             <button className="btn-action" onClick={onBack}>← Назад</button>
@@ -198,14 +196,12 @@ export default function Lobby({ onGameStart, onBack, wordCategories }) {
 
   return (
     <div className="app menu-screen">
-      <div className="window xp-window">
-        <div className="title-bar">
-          <div className="title-bar-text">БАЛДА.exe — Мультиплеер</div>
-          <div className="title-bar-controls">
-            <button aria-label="Close" onClick={onBack}></button>
-          </div>
+      <div className="game-panel">
+        <div className="panel-header">
+          <span className="panel-title">🎮 Мультиплеер</span>
+          <button className="panel-close" onClick={onBack}>✕</button>
         </div>
-        <div className="window-body">
+        <div className="panel-body">
       <div className="menu-container">
         <h1 className="game-title" style={{ fontSize: 32 }}>🎮 ОНЛАЙН</h1>
         <p className="subtitle">Мультиплеер</p>

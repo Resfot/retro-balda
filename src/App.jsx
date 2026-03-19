@@ -662,11 +662,11 @@ export default function App() {
   if (loading) {
     return (
       <div className="app loading-screen">
-        <div className="window xp-window">
-          <div className="title-bar">
-            <div className="title-bar-text">БАЛДА.exe — Загрузка</div>
+        <div className="game-panel">
+          <div className="panel-header">
+            <span className="panel-title">БАЛДА — Загрузка</span>
           </div>
-          <div className="window-body">
+          <div className="panel-body">
             <div className="loader">
               <div className="pixel-spinner" />
               <p>Загрузка словаря...</p>
@@ -680,16 +680,11 @@ export default function App() {
   if (screen === 'menu') {
     return (
       <div className="app menu-screen">
-        <div className="window xp-window">
-          <div className="title-bar">
-            <div className="title-bar-text">БАЛДА.exe — Главное меню</div>
-            <div className="title-bar-controls">
-              <button aria-label="Minimize"></button>
-              <button aria-label="Maximize"></button>
-              <button aria-label="Close"></button>
-            </div>
+        <div className="game-panel">
+          <div className="panel-header">
+            <span className="panel-title">БАЛДА — Главное меню</span>
           </div>
-          <div className="window-body">
+          <div className="panel-body">
             <div className="menu-container">
           <h1 className="game-title">БАЛДА</h1>
           <p className="subtitle">Ретро-издание</p>
@@ -808,16 +803,12 @@ export default function App() {
 
     return (
       <div className="app game-screen">
-        <div className="window xp-window">
-          <div className="title-bar">
-            <div className="title-bar-text">БАЛДА.exe — Игра</div>
-            <div className="title-bar-controls">
-              <button aria-label="Minimize"></button>
-              <button aria-label="Maximize"></button>
-              <button aria-label="Close" onClick={() => setScreen('menu')}></button>
-            </div>
+        <div className="game-panel">
+          <div className="panel-header">
+            <span className="panel-title">БАЛДА — Игра</span>
+            <button className="panel-close" onClick={() => setScreen('menu')}>✕</button>
           </div>
-          <div className="window-body">
+          <div className="panel-body">
         {/* Active category indicator */}
         {activeCategory && gameMode !== 'classic' && (
           <div className={`category-bar mode-${gameMode}`}>
