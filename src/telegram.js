@@ -129,7 +129,7 @@ export function closeApp() {
 // Share game invite
 export function shareGame(roomCode) {
   const botUsername = 'balda_word_bot';
-  const url = `https://t.me/${botUsername}?startapp=room_${roomCode}`;
+  const url = `https://t.me/${botUsername}?start=room_${roomCode}`;
   const text = '🎮 Го в БАЛДУ! Жми ссылку и заходи в игру!';
   
   if (tg) {
