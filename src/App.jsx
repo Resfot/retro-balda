@@ -20,10 +20,11 @@ const DIFFICULTIES = [
 ];
 
 const GAME_MODES = [
-  { id: 'classic', label: 'Классика', emoji: '🎮', desc: 'Обычные правила' },
-  { id: 'bonus', label: 'Бонус', emoji: '⭐', desc: 'Слова по теме ×2' },
-  { id: 'mixed', label: 'Микс', emoji: '🔀', desc: 'Тема меняется каждые 2-3 хода' },
-  { id: 'challenge', label: 'Вызов', emoji: '🔥', desc: '3 хода на слово по теме' },
+  { id: 'classic',   label: 'Классика', emoji: '🎮', desc: 'Обычные правила' },
+  { id: 'bonus',     label: 'Бонус',    emoji: '⭐', desc: 'Слова по теме ×2' },
+  { id: 'mixed',     label: 'Микс',     emoji: '🔀', desc: 'Тема меняется каждые 2-3 хода' },
+  { id: 'challenge', label: 'Вызов',    emoji: '🔥', desc: '3 хода на слово по теме' },
+  { id: 'geo',       label: 'Гео',      emoji: '🌍', desc: 'Города и реки ×3 очков' },
 ];
 
 const CHALLENGE_TURNS = 3;
@@ -81,6 +82,15 @@ export default function App() {
   const [hintLevel, setHintLevel] = useState(0); // 0-2 progressive
   const [hintsUsed, setHintsUsed] = useState(0);
   const [showWordInfo, setShowWordInfo] = useState(null);
+
+  // Geo dictionary (loaded separately, used only in geo mode)
+  const [geoSet, setGeoSet] = useState(new Set());
+
+  // Curated start words per category (loaded separately)
+  const [startWords, setStartWords] = useState(null);
+
+  // Minimum word length (3 or 4, configurable per game)
+  const [minWordLength, setMinWordLength] = useState(3);
 
   // Multiplayer state
   const [multiRoom, setMultiRoom] = useState(null);
@@ -171,7 +181,10 @@ export default function App() {
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = null;
     };
-  }, [currentPlayer, phase === 'place' || phase === 'trace' ? 'active' : 'inactive', turnTime]);
+  // Only reset timer when a new turn starts (currentPlayer changes) — NOT on phase changes
+  // within the same turn (place → trace). The phase guard above prevents the interval
+  // from starting during aiThinking/gameOver without needing phase in the dep array.
+  }, [currentPlayer, turnTime]);
 
   // Auto-pass when timer hits 0
   const autoPassRef = useRef(null);
@@ -242,18 +255,33 @@ export default function App() {
   useEffect(() => {
     let loaded = false;
 
+    // Also load geo dictionary (non-blocking — used only in geo mode)
+    fetch('./dictionary_geo.json')
+      .then(r => r.ok ? r.json() : [])
+      .then(geoWords => { if (Array.isArray(geoWords)) setGeoSet(new Set(geoWords)); })
+      .catch(() => {});
+
+    // Load curated start words (non-blocking — falls back to random if missing)
+    fetch('./start_words.json')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setStartWords(data); })
+      .catch(() => {});
+
     // Try categorized dictionary first
     fetch('./dictionary_categorized.json')
       .then(r => { if (!r.ok) throw new Error('not found'); return r.json(); })
       .then(data => {
         if (loaded) return;
         loaded = true;
-        // Categorized format: { word: category, ... }
-        const words = Object.keys(data);
+        // Strip geo from main dict — geo lives in its own mode
+        const baseData = Object.fromEntries(
+          Object.entries(data).filter(([, cat]) => cat !== 'geo')
+        );
+        const words = Object.keys(baseData);
         setDictionary(words);
         setDictSet(new Set(words));
-        setWordCategories(data);
-        setAvailableCategories(getAvailableCategories(data));
+        setWordCategories(baseData);
+        setAvailableCategories(getAvailableCategories(baseData));
         setLoading(false);
       })
       .catch(() => {
@@ -307,14 +335,17 @@ export default function App() {
     }
   }, []);
 
+  // Effective dictionary: base + geo names when in geo mode
+  const effectiveDictSet = React.useMemo(
+    () => (gameMode === 'geo' && geoSet.size > 0 ? new Set([...dictSet, ...geoSet]) : dictSet),
+    [dictSet, geoSet, gameMode]
+  );
+
   // Start new game
   const startGame = useCallback(() => {
     if (!dictionary) return;
-    const word = getRandomStartWord(dictionary, gridSize);
-    const newGrid = createGrid(gridSize, word);
-    const initialUsed = new Set([word]);
 
-    // Set up category for the mode
+    // Derive category first — start word pool depends on it
     let cat = null;
     let rotateAt = 0;
     if (gameMode === 'bonus') {
@@ -325,6 +356,11 @@ export default function App() {
     } else if (gameMode === 'challenge') {
       cat = selectedCategory;
     }
+    // geo mode: cat stays null — scoring handled by geoSet in calculateScore
+
+    const word = getRandomStartWord(dictionary, gridSize, cat, startWords);
+    const newGrid = createGrid(gridSize, word);
+    const initialUsed = new Set([word]);
 
     setGrid(newGrid);
     setStartWord(word);
@@ -354,7 +390,7 @@ export default function App() {
       ? `Ваш ход! Тема: ${CATEGORY_LABELS[cat] || cat}`
       : 'Ваш ход! Поставьте букву');
     setScreen('game');
-  }, [dictionary, gridSize, gameMode, selectedCategory, availableCategories]);
+  }, [dictionary, gridSize, gameMode, selectedCategory, availableCategories, startWords]);
 
   // Handle cell click
   const handleCellClick = (row, col) => {
@@ -422,7 +458,7 @@ export default function App() {
       currentGrid[placedCell[0]][placedCell[1]] = '';
     }
 
-    const h = findHint(currentGrid, usedWords, dictSet, wordCategories, activeCategory, nextLevel);
+    const h = findHint(currentGrid, usedWords, dictSet, wordCategories, activeCategory, nextLevel, minWordLength, geoSet);
 
     if (!h) {
       setMessage('Подсказок нет — нет доступных ходов!');
@@ -489,7 +525,7 @@ export default function App() {
       return;
     }
 
-    const result = validateMove(grid, selectedPath, placedCell, usedWords, dictSet);
+    const result = validateMove(grid, selectedPath, placedCell, usedWords, effectiveDictSet, minWordLength);
     if (!result.valid) {
       hapticNotification('error');
       setMessage(result.reason);
@@ -499,8 +535,8 @@ export default function App() {
     }
 
     hapticNotification('success');
-    // Calculate score with category multiplier
-    const scoreInfo = calculateScore(result.word, wordCategories, gameMode, activeCategory);
+    // Calculate score with category / geo multiplier
+    const scoreInfo = calculateScore(result.word, wordCategories, gameMode, activeCategory, geoSet);
     const newScores = [...scores];
     newScores[0] += scoreInfo.score;
 
@@ -623,7 +659,9 @@ export default function App() {
       difficulty,
       wordCategories,
       gameMode,
-      cat
+      cat,
+      minWordLength,
+      geoSet,
     );
 
     if (!move) {
@@ -651,7 +689,7 @@ export default function App() {
     const newGrid = currentGrid.map(r => [...r]);
     newGrid[move.placedCell[0]][move.placedCell[1]] = move.letter;
 
-    const scoreInfo = calculateScore(move.word, wordCategories, gameMode, cat);
+    const scoreInfo = calculateScore(move.word, wordCategories, gameMode, cat, geoSet);
     const newScores = [...currentScores];
     newScores[1] += scoreInfo.score;
 
@@ -668,51 +706,58 @@ export default function App() {
     const newUsed = new Set(currentUsed);
     newUsed.add(move.word);
 
-    setGrid(newGrid);
-    setScores(finalScores);
-    setPlayerWords(newPlayerWords);
-    setUsedWords(newUsed);
-    setPassCount(0);
-    setLastMoveHighlight({ path: move.path, player: 2 });
-    setAiPath(move.path);
-
-    let msg = `Бот: "${move.word}" — ${scoreInfo.score} очков`;
-    if (scoreInfo.multiplier > 1) msg += ` (×${scoreInfo.multiplier}!)`;
-    else if (scoreInfo.multiplier < 1) msg += ` (не по теме)`;
-    setMessage(msg);
-    setLastScoreInfo(scoreInfo);
-    setShowWordInfo({
-      word: move.word,
-      category: getWordCategory(move.word, wordCategories),
-      isCategory: scoreInfo.isCategory,
-      multiplier: scoreInfo.multiplier,
-      player: 2,
-    });
-
-    if (isGridFull(newGrid) || getValidPlacements(newGrid).length === 0) {
-      setPhase('gameOver');
-      return;
-    }
+    // Realistic thinking delay: 5s min, 90% of turn timer max (or 12s if no timer)
+    const minDelay = 5000;
+    const maxDelay = turnTime > 0 ? Math.floor(turnTime * 900) : 12000;
+    const thinkTime = Math.floor(Math.random() * (maxDelay - minDelay)) + minDelay;
 
     setTimeout(() => {
-      setAiPath([]);
-      setCurrentPlayer(1);
-      setPhase('place');
+      setGrid(newGrid);
+      setScores(finalScores);
+      setPlayerWords(newPlayerWords);
+      setUsedWords(newUsed);
+      setPassCount(0);
+      setLastMoveHighlight({ path: move.path, player: 2 });
+      setAiPath(move.path);
 
-      // Rotate category in mixed mode after AI turn too
-      const newTurns = totalTurns + 1;
-      setTurnsSinceRotate(newTurns);
-      const rotated2 = maybeRotateCategory(newTurns);
-      const finalCat = rotated2 || cat;
+      let msg = `Бот: "${move.word}" — ${scoreInfo.score} очков`;
+      if (scoreInfo.multiplier > 1) msg += ` (×${scoreInfo.multiplier}!)`;
+      else if (scoreInfo.multiplier < 1) msg += ` (не по теме)`;
+      setMessage(msg);
+      setLastScoreInfo(scoreInfo);
+      setShowWordInfo({
+        word: move.word,
+        category: getWordCategory(move.word, wordCategories),
+        isCategory: scoreInfo.isCategory,
+        multiplier: scoreInfo.multiplier,
+        player: 2,
+      });
 
-      if (finalCat && rotated2) {
-        setMessage(`Новая тема: ${CATEGORY_LABELS[finalCat] || finalCat}! Ваш ход!`);
-      } else if (finalCat) {
-        setMessage(`Ваш ход! Тема: ${CATEGORY_LABELS[finalCat] || finalCat}`);
-      } else {
-        setMessage('Ваш ход! Поставьте букву');
+      if (isGridFull(newGrid) || getValidPlacements(newGrid).length === 0) {
+        setPhase('gameOver');
+        return;
       }
-    }, 1500);
+
+      setTimeout(() => {
+        setAiPath([]);
+        setCurrentPlayer(1);
+        setPhase('place');
+
+        // Rotate category in mixed mode after AI turn too
+        const newTurns = totalTurns + 1;
+        setTurnsSinceRotate(newTurns);
+        const rotated2 = maybeRotateCategory(newTurns);
+        const finalCat = rotated2 || cat;
+
+        if (finalCat && rotated2) {
+          setMessage(`Новая тема: ${CATEGORY_LABELS[finalCat] || finalCat}! Ваш ход!`);
+        } else if (finalCat) {
+          setMessage(`Ваш ход! Тема: ${CATEGORY_LABELS[finalCat] || finalCat}`);
+        } else {
+          setMessage('Ваш ход! Поставьте букву');
+        }
+      }, 1500);
+    }, thinkTime);
   };
 
   // Cell state helpers
@@ -822,6 +867,14 @@ export default function App() {
             </div>
           </div>
 
+          <div className="menu-section">
+            <label>Мин. длина слова</label>
+            <div className="btn-group">
+              <button className={minWordLength === 3 ? 'active' : ''} onClick={() => setMinWordLength(3)}>3 буквы</button>
+              <button className={minWordLength === 4 ? 'active' : ''} onClick={() => setMinWordLength(4)}>4 буквы</button>
+            </div>
+          </div>
+
           {/* Category picker for bonus/challenge modes */}
           {(gameMode === 'bonus' || gameMode === 'challenge') && hasCategorizedDict && (
             <div className="menu-section">
@@ -850,7 +903,7 @@ export default function App() {
           <button
             className="btn-play"
             onClick={startGame}
-            disabled={(gameMode === 'bonus' || gameMode === 'challenge') && !selectedCategory}
+            disabled={(gameMode === 'bonus' || gameMode === 'challenge') && hasCategorizedDict && !selectedCategory}
           >
             ИГРАТЬ
           </button>

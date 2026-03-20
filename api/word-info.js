@@ -8,6 +8,32 @@ const supabase = createClient(
 const MODEL = 'claude-haiku-4-5-20251001';
 
 async function callClaude(word) {
+  const prompt = `Ты — эксперт по русскому языку и этимологии. Пользователь играет в игру "Балда" и составил слово.
+
+Дай информацию о слове "${word}".
+
+СТРОГИЕ ПРАВИЛА:
+1. ОПРЕДЕЛЕНИЕ: Дай краткое, точное определение (1-2 предложения). Без воды. Если слово имеет несколько значений — дай самое распространённое.
+
+2. ИНТЕРЕСНЫЙ ФАКТ: Один реальный, проверяемый факт. Это ДОЛЖЕН быть:
+   - Этимология (откуда пришло слово, из какого языка, как менялось значение)
+   - Или удивительная связь с другими словами (родственные слова в других языках, неочевидные однокоренные)
+   - Или реальный исторический/научный факт, связанный с этим словом/понятием
+   - Или необычное применение/рекорд/статистика из реальной жизни
+
+   ЗАПРЕЩЕНО:
+   - Выдумывать факты. Если не уверен — лучше дай этимологию, она всегда интересна.
+   - Банальности вроде "это слово часто используется в быту"
+   - Общие фразы вроде "играет важную роль в культуре"
+   - Повторять определение другими словами
+
+3. ЧАСТОТНОСТЬ: Одно слово — "Частое", "Среднее" или "Редкое"
+
+Ответь строго в JSON:
+{"definition": "...", "fun_fact": "...", "frequency": "Частое|Среднее|Редкое"}
+
+Только JSON, без маркдауна, без комментариев.`;
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -18,20 +44,7 @@ async function callClaude(word) {
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 500,
-      messages: [
-        {
-          role: 'user',
-          content: `Дай краткую информацию о русском слове "${word}". Ответь ТОЛЬКО в формате JSON без markdown:
-{
-  "definition": "краткое определение слова (1 предложение, max 15 слов)",
-  "fun_fact": "интересный факт, этимология, или необычное использование этого слова (1-2 предложения, max 30 слов)",
-  "frequency": "common|intermediate|advanced|rare"
-}
-
-Частотность: common = топ-3000 слов, intermediate = 3000-10000, advanced = 10000-30000, rare = остальные.
-Факт должен быть познавательным и увлекательным — этимология, история, связь с другими языками, необычные значения.`,
-        },
-      ],
+      messages: [{ role: 'user', content: prompt }],
     }),
   });
 
@@ -45,10 +58,21 @@ async function callClaude(word) {
     if (block.type === 'text') text += block.text;
   }
 
-  text = text.trim();
-  if (text.startsWith('```')) text = text.split('\n').slice(1).join('\n');
-  if (text.endsWith('```')) text = text.slice(0, -3);
-  return JSON.parse(text.trim());
+  // Strip markdown code fences (handles ```json ... ``` and plain ``` ... ```)
+  text = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = {};
+  }
+
+  return {
+    definition: parsed.definition || '',
+    fun_fact:   parsed.fun_fact   || '',
+    frequency:  parsed.frequency  || 'Среднее',
+  };
 }
 
 export default async function handler(req, res) {
