@@ -57,7 +57,10 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
 
   // Currency
   const [currency, setCurrency] = useState(() => {
-    try { return Number(localStorage.getItem('balda_currency')) || 5; } catch { return 5; }
+    try {
+      const saved = localStorage.getItem('balda_currency');
+      return saved !== null ? Number(saved) : 5;
+    } catch { return 5; }
   });
   const [earnMessage, setEarnMessage] = useState(null);
   useEffect(() => {
@@ -651,8 +654,10 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
       {!isGameOver && !isMyTurn && (
         <div className="actions">
           <div className="ai-thinking">
-            <div className="pixel-spinner small" />
-            <span>Ход соперника...</span>
+            <span>Ход соперника</span>
+            <div className="thinking-dots">
+              <span /><span /><span />
+            </div>
           </div>
         </div>
       )}

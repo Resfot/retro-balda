@@ -9,7 +9,7 @@ import {
 import WordInfo from './WordInfo';
 import Lobby from './Lobby';
 import MultiplayerGame from './MultiplayerGame';
-import { isTelegram, hapticImpact, hapticNotification, hapticSelection, onBackButton, shareInvite, getInviteLink } from './telegram';
+import { isTelegram, hapticImpact, hapticNotification, hapticSelection, onBackButton, shareInvite, getInviteLink, getRoomCodeFromStart } from './telegram';
 import { initUser, onGameComplete, getReferralStats, syncCurrency, loadCurrency } from './referral';
 import { getPlayerId } from './supabase';
 
@@ -90,6 +90,9 @@ export default function App() {
   const [refStats, setRefStats] = useState({ total: 0, rewarded: 0, pending: 0 });
   const [referralMessage, setReferralMessage] = useState(null);
 
+  // Auto-join room from Telegram deep link
+  const [autoJoinCode, setAutoJoinCode] = useState(null);
+
   // Currency system (Буквы)
   const HINT_COSTS = [1, 2, 3]; // cost per level
   const STARTING_BALANCE = 5;
@@ -102,6 +105,8 @@ export default function App() {
     } catch { return STARTING_BALANCE; }
   });
   const [earnMessage, setEarnMessage] = useState(null); // { text, amount }
+  const [errorShake, setErrorShake] = useState(false);
+  const [scorePopup, setScorePopup] = useState(null); // { value, id }
 
   // Timer state
   const [timeLeft, setTimeLeft] = useState(0);
@@ -210,7 +215,7 @@ export default function App() {
       setTurnsSinceRotate(newTurns);
       setCurrentPlayer(2);
       setPhase('aiThinking');
-      setTimeout(() => runAI(grid.map(r => [...r]), usedWords, currentScores, playerWords, newTurns), 800);
+      setTimeout(() => runAI(grid.map(r => [...r]), usedWords, currentScores, playerWords, newTurns, newPassCount), 800);
     }
   };
 
@@ -292,6 +297,15 @@ export default function App() {
   useEffect(() => {
     syncCurrency(currency);
   }, [currency]);
+
+  // Check for room invite deep link on startup
+  useEffect(() => {
+    const roomCode = getRoomCodeFromStart();
+    if (roomCode) {
+      setAutoJoinCode(roomCode);
+      setScreen('lobby');
+    }
+  }, []);
 
   // Start new game
   const startGame = useCallback(() => {
@@ -477,6 +491,8 @@ export default function App() {
     if (!result.valid) {
       hapticNotification('error');
       setMessage(result.reason);
+      setErrorShake(true);
+      setTimeout(() => setErrorShake(false), 500);
       return;
     }
 
@@ -515,6 +531,10 @@ export default function App() {
       multiplier: scoreInfo.multiplier,
       player: 1,
     });
+    const popupId = Date.now();
+    setScorePopup({ value: scoreInfo.score, id: popupId });
+    setTimeout(() => setScorePopup(null), 1600);
+
     let msg = `"${result.word}" — ${scoreInfo.score} очков`;
     if (scoreInfo.multiplier > 1) msg += ` (×${scoreInfo.multiplier}!)`;
     else if (scoreInfo.multiplier < 1) msg += ` (не по теме)`;
@@ -535,7 +555,7 @@ export default function App() {
 
     setCurrentPlayer(2);
     setPhase('aiThinking');
-    setTimeout(() => runAI(grid, newUsed, finalScores, newPlayerWords, newTurns), 800);
+    setTimeout(() => runAI(grid, newUsed, finalScores, newPlayerWords, newTurns, 0), 800);
   };
 
   const undoPlace = () => {
@@ -584,11 +604,11 @@ export default function App() {
     setMessage('Вы спасовали. Ход бота...');
     setCurrentPlayer(2);
     setPhase('aiThinking');
-    setTimeout(() => runAI(grid.map(r => [...r]), usedWords, currentScores, playerWords, newTurns), 800);
+    setTimeout(() => runAI(grid.map(r => [...r]), usedWords, currentScores, playerWords, newTurns, newPassCount), 800);
   };
 
   // AI Turn
-  const runAI = (currentGrid, currentUsed, currentScores, currentPlayerWords, totalTurns) => {
+  const runAI = (currentGrid, currentUsed, currentScores, currentPlayerWords, totalTurns, currentPassCount) => {
     // Maybe rotate category in mixed mode
     let cat = activeCategory;
     const rotated = maybeRotateCategory(totalTurns);
@@ -605,7 +625,7 @@ export default function App() {
     );
 
     if (!move) {
-      const newPassCount = passCount + 1;
+      const newPassCount = currentPassCount + 1;
       if (newPassCount >= 2) {
         setPhase('gameOver');
         setMessage('Игра окончена! Бот спасовал');
@@ -930,7 +950,7 @@ export default function App() {
         )}
 
         {/* Score Bar */}
-        <div className="score-bar">
+        <div className="score-bar" style={{ position: 'relative' }}>
           <div className={`player-score ${currentPlayer === 1 && !isGameOver ? 'active' : ''}`}>
             <span className="player-label">Вы</span>
             <span className="score-value">{scores[0]}</span>
@@ -940,6 +960,9 @@ export default function App() {
             <span className="player-label">Бот</span>
             <span className="score-value">{scores[1]}</span>
           </div>
+          {scorePopup && (
+            <div key={scorePopup.id} className="score-popup">+{scorePopup.value}</div>
+          )}
         </div>
 
         {/* Currency */}
@@ -964,7 +987,7 @@ export default function App() {
         </div>
 
         {/* Message */}
-        <div className={`message-bar ${phase === 'aiThinking' ? 'thinking' : ''}`}>
+        <div className={`message-bar ${phase === 'aiThinking' ? 'thinking' : ''} ${errorShake ? 'shake' : ''}`}>
           {message}
           {currentTracedWord && <span className="traced-word"> → {currentTracedWord}</span>}
           {turnTime > 0 && currentPlayer === 1 && (phase === 'place' || phase === 'trace') && (
@@ -1023,8 +1046,10 @@ export default function App() {
             )}
             {phase === 'aiThinking' && (
               <div className="ai-thinking">
-                <div className="pixel-spinner small" />
-                <span>Бот думает...</span>
+                <span>Бот думает</span>
+                <div className="thinking-dots">
+                  <span /><span /><span />
+                </div>
               </div>
             )}
           </div>
@@ -1167,8 +1192,10 @@ export default function App() {
           setMultiPlayerNumber(playerNum);
           setScreen('multiplayer');
         }}
-        onBack={() => setScreen('menu')}
+        onBack={() => { setScreen('menu'); setAutoJoinCode(null); }}
         wordCategories={wordCategories}
+        autoJoinCode={autoJoinCode}
+        onAutoJoinConsumed={() => setAutoJoinCode(null)}
       />
     );
   }

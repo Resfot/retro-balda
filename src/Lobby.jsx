@@ -16,7 +16,7 @@ const GAME_MODES = [
   { id: 'challenge', label: 'Вызов', emoji: '🔥' },
 ];
 
-export default function Lobby({ onGameStart, onBack, wordCategories }) {
+export default function Lobby({ onGameStart, onBack, wordCategories, autoJoinCode, onAutoJoinConsumed }) {
   const [tab, setTab] = useState('main'); // main, create, join, waiting, matchmaking
   const [name, setName] = useState(getPlayerName());
   const [roomCode, setRoomCode] = useState('');
@@ -87,9 +87,9 @@ export default function Lobby({ onGameStart, onBack, wordCategories }) {
   };
 
   // Join room by code
-  const joinRoom = async () => {
+  const joinRoom = async (codeOverride) => {
     setError('');
-    const code = roomCode.trim().toLowerCase();
+    const code = (codeOverride || roomCode).trim().toLowerCase();
     if (!code) { setError('Введите код комнаты'); return; }
 
     try {
@@ -117,6 +117,17 @@ export default function Lobby({ onGameStart, onBack, wordCategories }) {
       setError('Ошибка: ' + e.message);
     }
   };
+
+  // Auto-join room from Telegram deep link
+  useEffect(() => {
+    if (autoJoinCode && supabase) {
+      setTab('join');
+      setRoomCode(autoJoinCode);
+      if (onAutoJoinConsumed) onAutoJoinConsumed();
+      // Small delay so UI renders, then auto-join
+      setTimeout(() => joinRoom(autoJoinCode), 500);
+    }
+  }, [autoJoinCode]);
 
   // Quick matchmaking
   const findMatch = async () => {
@@ -227,19 +238,25 @@ export default function Lobby({ onGameStart, onBack, wordCategories }) {
           <>
             <div className="lobby-buttons">
               <button className="lobby-btn lobby-create" onClick={() => setTab('create')}>
-                <span className="lobby-btn-emoji">🏠</span>
-                <span className="lobby-btn-label">Создать комнату</span>
-                <span className="lobby-btn-desc">Пригласите друга по коду</span>
+                <span className="lobby-btn-emoji">🎮</span>
+                <div>
+                  <span className="lobby-btn-label">Пригласить друга</span>
+                  <span className="lobby-btn-desc">Создайте игру и отправьте ссылку</span>
+                </div>
               </button>
               <button className="lobby-btn lobby-join" onClick={() => setTab('join')}>
-                <span className="lobby-btn-emoji">🚪</span>
-                <span className="lobby-btn-label">Войти по коду</span>
-                <span className="lobby-btn-desc">Введите код комнаты</span>
+                <span className="lobby-btn-emoji">🔗</span>
+                <div>
+                  <span className="lobby-btn-label">Войти по коду</span>
+                  <span className="lobby-btn-desc">У вас есть код от друга</span>
+                </div>
               </button>
               <button className="lobby-btn lobby-match" onClick={findMatch}>
                 <span className="lobby-btn-emoji">🔍</span>
-                <span className="lobby-btn-label">Быстрая игра</span>
-                <span className="lobby-btn-desc">Случайный соперник</span>
+                <div>
+                  <span className="lobby-btn-label">Случайный соперник</span>
+                  <span className="lobby-btn-desc">Быстрая игра с кем-то онлайн</span>
+                </div>
               </button>
             </div>
             <button className="btn-action" onClick={onBack} style={{ marginTop: 20 }}>← Меню</button>
@@ -345,18 +362,27 @@ export default function Lobby({ onGameStart, onBack, wordCategories }) {
               <div className="room-code-display">
                 <label>Код комнаты:</label>
                 <span className="room-code">{roomId.toUpperCase()}</span>
+                
+                {/* Primary action: invite via Telegram */}
+                <button className="invite-btn" style={{ marginTop: 12 }} onClick={() => {
+                  shareGame(roomId);
+                  hapticImpact('medium');
+                }}>
+                  {isTelegram ? '📨 Пригласить друга' : '📋 Скопировать ссылку'}
+                </button>
+                
+                {/* Secondary: copy code */}
                 <button
                   className="btn-action"
-                  onClick={() => { navigator.clipboard?.writeText(roomId); hapticImpact('light'); }}
-                  style={{ fontSize: 12, padding: '4px 10px' }}
+                  onClick={() => { 
+                    const link = `https://t.me/balda_word_bot?start=room_${roomId}`;
+                    navigator.clipboard?.writeText(isTelegram ? link : roomId); 
+                    hapticImpact('light'); 
+                  }}
+                  style={{ fontSize: 12, padding: '6px 12px', marginTop: 6 }}
                 >
-                  📋 Копировать
+                  {isTelegram ? '🔗 Скопировать ссылку' : '📋 Скопировать код'}
                 </button>
-                {isTelegram && (
-                  <button className="tg-share-btn" onClick={() => shareGame(roomId)}>
-                    📨 Пригласить в Telegram
-                  </button>
-                )}
               </div>
             )}
             <button className="btn-action" onClick={cancelWaiting} style={{ marginTop: 20 }}>

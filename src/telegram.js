@@ -128,18 +128,19 @@ export function closeApp() {
 
 // Share game invite
 export function shareGame(roomCode) {
-  if (!tg) return;
-  
   const botUsername = 'balda_word_bot';
-  const url = `https://t.me/${botUsername}?start=join_${roomCode}`;
-  const text = `Играем в БАЛДУ! Заходи по коду: ${roomCode.toUpperCase()}`;
+  const url = `https://t.me/${botUsername}?start=room_${roomCode}`;
+  const text = '🎮 Го в БАЛДУ! Жми ссылку и заходи в игру!';
   
-  // Use Telegram's native share
-  try {
-    tg.switchInlineQuery(text, ['users', 'groups', 'channels']);
-  } catch {
-    // Fallback: open share URL
-    tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`);
+  if (tg) {
+    try {
+      tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`);
+    } catch {
+      navigator.clipboard?.writeText(url);
+    }
+  } else {
+    // Browser fallback
+    navigator.clipboard?.writeText(url);
   }
 }
 
@@ -175,6 +176,13 @@ export function getReferrerId() {
   const param = getStartParam();
   if (!param || !param.startsWith('ref_')) return null;
   return param.substring(4);
+}
+
+// Get room code from start param (format: room_ABCDEF)
+export function getRoomCodeFromStart() {
+  const param = getStartParam();
+  if (!param || !param.startsWith('room_')) return null;
+  return param.substring(5);
 }
 
 // Generate invite link for sharing

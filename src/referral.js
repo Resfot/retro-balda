@@ -34,11 +34,10 @@ export async function initUser() {
 
       // Record referral if came from invite link
       if (referrerId && referrerId !== playerId) {
-        await supabase.from('referrals').insert({
-          referrer_id: referrerId,
-          referred_id: playerId,
-          rewarded: false,
-        }).onConflict('referrer_id,referred_id').ignore();
+        await supabase.from('referrals').upsert(
+          { referrer_id: referrerId, referred_id: playerId, rewarded: false },
+          { onConflict: 'referrer_id,referred_id', ignoreDuplicates: true }
+        );
       }
     }
   } catch (err) {

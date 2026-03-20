@@ -1,0 +1,7 @@
+{
+  "enabledPlugins": {
+    "design-for-ai@rtd": true,
+    "code-foundations@rtd": true,
+    "oberskills@rtd": true
+  }
+}
