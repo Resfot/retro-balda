@@ -125,7 +125,7 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
       setMessage('Ваш ход!');
 
       // Delay so guest's Realtime subscription has time to connect before we broadcast init
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 2500));
 
       // Save initial state to Supabase
       supabase.from('game_rooms').update({
@@ -163,6 +163,37 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
+  }, [roomId]);
+
+  // Guest fallback: poll DB directly in case the Realtime subscription
+  // wasn't established yet when the host broadcast the init event.
+  // Supabase Realtime doesn't replay missed events, so we read directly.
+  useEffect(() => {
+    if (myNumber !== 2) return;
+
+    let cancelled = false;
+
+    const poll = async () => {
+      if (cancelled || gridRef.current) return;
+
+      const { data: room } = await supabase
+        .from('game_rooms')
+        .select('grid, last_move, used_words, active_category, scores, player_words, status')
+        .eq('id', roomId)
+        .single();
+
+      if (cancelled) return;
+
+      if (room?.last_move?.type === 'init' && !gridRef.current) {
+        handleRoomUpdateRef.current(room);
+      } else if (!gridRef.current) {
+        setTimeout(poll, 1000); // retry every second until grid arrives
+      }
+    };
+
+    // Start polling 800ms after mount to let the Realtime sub establish first
+    const timer = setTimeout(poll, 800);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [roomId]);
 
   const handleRoomUpdate = (room) => {

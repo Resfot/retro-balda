@@ -4,6 +4,7 @@
   "framework": "vite",
   "rewrites": [
     { "source": "/api/word-info", "destination": "/api/word-info" },
-    { "source": "/api/bot", "destination": "/api/bot" }
+    { "source": "/api/bot", "destination": "/api/bot" },
+    { "source": "/api/setup-webhook", "destination": "/api/setup-webhook" }
   ]
 }
