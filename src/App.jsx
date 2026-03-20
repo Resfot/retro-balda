@@ -348,6 +348,8 @@ export default function App() {
     setHintLevel(0);
     setHintsUsed(0);
     setShowWordInfo(null);
+    // Top up Буквы to starting balance at the start of every game
+    setCurrency(prev => Math.max(prev, STARTING_BALANCE));
     setMessage(cat
       ? `Ваш ход! Тема: ${CATEGORY_LABELS[cat] || cat}`
       : 'Ваш ход! Поставьте букву');

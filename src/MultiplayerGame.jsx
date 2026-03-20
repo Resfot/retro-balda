@@ -81,9 +81,11 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
   const [earnMessage, setEarnMessage] = useState(null);
   const syncTimerRef = useRef(null);
 
-  // Load authoritative balance from Supabase on mount
+  // Load authoritative balance from Supabase on mount, ensure at least 5
   useEffect(() => {
-    loadCurrency().then(val => { if (val !== null) setCurrency(val); });
+    loadCurrency().then(val => {
+      setCurrency(prev => Math.max(val !== null ? val : prev, 5));
+    });
   }, []);
 
   // Persist to localStorage immediately + debounce Supabase sync
