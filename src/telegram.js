@@ -167,8 +167,23 @@ export function onBackButton(callback) {
 
 // Get start parameter (for referral links)
 export function getStartParam() {
-  if (!tg?.initDataUnsafe?.start_param) return null;
-  return tg.initDataUnsafe.start_param;
+  // Primary: set by Telegram when app is opened via ?startapp= direct link
+  if (tg?.initDataUnsafe?.start_param) return tg.initDataUnsafe.start_param;
+
+  // Fallback: Telegram injects tgWebAppStartParam into the URL hash
+  try {
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const hashVal = hashParams.get('tgWebAppStartParam');
+    if (hashVal) return hashVal;
+  } catch {}
+
+  // Fallback: when opened via bot's web_app button, the param is in the URL query string
+  try {
+    const searchVal = new URLSearchParams(window.location.search).get('startapp');
+    if (searchVal) return searchVal;
+  } catch {}
+
+  return null;
 }
 
 // Get referrer ID from start param (format: ref_PLAYERID)
