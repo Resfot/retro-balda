@@ -3,6 +3,7 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
-    { "source": "/api/word-info", "destination": "/api/word-info" }
+    { "source": "/api/word-info", "destination": "/api/word-info" },
+    { "source": "/api/bot", "destination": "/api/bot" }
   ]
 }
