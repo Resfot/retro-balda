@@ -148,18 +148,10 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
   const handleRoomUpdateRef = useRef(handleRoomUpdate);
   useEffect(() => { handleRoomUpdateRef.current = handleRoomUpdate; });
 
-  // Subscribe to room changes + presence (disconnection detection)
+  // Subscribe to room changes
   useEffect(() => {
     const channel = supabase
       .channel(`game-${roomId}`)
-      .on('presence', { event: 'leave' }, ({ leftPresences }) => {
-        const opponentLeft = leftPresences.some(p => p.player !== myNumber);
-        if (opponentLeft && phaseRef.current !== 'gameOver') {
-          setDisconnected(true);
-          setPhase('gameOver');
-          setMessage('Соперник отключился');
-        }
-      })
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
@@ -168,11 +160,7 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
       }, (payload) => {
         handleRoomUpdateRef.current(payload.new);
       })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          await channel.track({ player: myNumber, joined: Date.now() });
-        }
-      });
+      .subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, [roomId]);
