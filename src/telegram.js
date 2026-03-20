@@ -16,8 +16,8 @@ export function initTelegram() {
   
   // Set header color to match our theme
   try {
-    tg.setHeaderColor('#1a0a3e');
-    tg.setBackgroundColor('#0d1b4a');
+    tg.setHeaderColor('#0e1e40');
+    tg.setBackgroundColor('#020308');
   } catch {}
 
   // Tell Telegram the app is ready
@@ -129,7 +129,7 @@ export function closeApp() {
 // Share game invite
 export function shareGame(roomCode) {
   const botUsername = 'balda_word_bot';
-  const url = `https://t.me/${botUsername}?start=room_${roomCode}`;
+  const url = `https://t.me/${botUsername}?startapp=room_${roomCode}`;
   const text = '🎮 Го в БАЛДУ! Жми ссылку и заходи в игру!';
   
   if (tg) {

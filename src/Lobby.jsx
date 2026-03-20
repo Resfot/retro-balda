@@ -375,7 +375,7 @@ export default function Lobby({ onGameStart, onBack, wordCategories, autoJoinCod
                 <button
                   className="btn-action"
                   onClick={() => { 
-                    const link = `https://t.me/balda_word_bot?start=room_${roomId}`;
+                    const link = `https://t.me/balda_word_bot?startapp=room_${roomId}`;
                     navigator.clipboard?.writeText(isTelegram ? link : roomId); 
                     hapticImpact('light'); 
                   }}

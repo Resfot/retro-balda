@@ -78,7 +78,7 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
   const roomId = initialRoom.id;
 
   // Initialize game (host creates the board)
-  useEffect(() => {
+  useEffect(() => { (async () => {
     if (myNumber === 1) {
       // Host initializes
       const word = getRandomStartWord(dictionary, gridSize);
@@ -96,6 +96,9 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
       setGrid(newGrid);
       setMessage('Ваш ход!');
 
+      // Delay so guest's Realtime subscription has time to connect before we broadcast init
+      await new Promise(r => setTimeout(r, 1500));
+
       // Save initial state to Supabase
       supabase.from('game_rooms').update({
         grid: newGrid,
@@ -111,7 +114,7 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
 
       setUsedWords(new Set([word]));
     }
-  }, []);
+  })(); }, []);
 
   // Subscribe to room changes
   useEffect(() => {
