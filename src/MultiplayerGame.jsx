@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, getPlayerId } from './supabase';
+import { loadCurrency, syncCurrency } from './referral';
 import {
   createGrid, getRandomStartWord, hasAdjacentFilled, getValidPlacements,
   isPathValid, getWordFromPath, validateMove, isGridFull,
@@ -51,11 +52,26 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
   const [hint, setHint] = useState(null);
   const [hintLevel, setHintLevel] = useState(0);
 
+  // Disconnection
+  const [disconnected, setDisconnected] = useState(false);
+
   // Timer
   const [timeLeft, setTimeLeft] = useState(turnTime);
   const timerRef = useRef(null);
 
-  // Currency
+  // Refs to fix stale-closure bugs in async callbacks
+  const passCountRef = useRef(0);
+  const phaseRef = useRef('place');
+  const gridRef = useRef(null);
+  const placedCellRef = useRef(null);
+  const scoresRef = useRef([0, 0]);
+  useEffect(() => { passCountRef.current = passCount; }, [passCount]);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => { gridRef.current = grid; }, [grid]);
+  useEffect(() => { placedCellRef.current = placedCell; }, [placedCell]);
+  useEffect(() => { scoresRef.current = scores; }, [scores]);
+
+  // Currency — initialise from localStorage, then sync with Supabase
   const [currency, setCurrency] = useState(() => {
     try {
       const saved = localStorage.getItem('balda_currency');
@@ -63,8 +79,18 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     } catch { return 5; }
   });
   const [earnMessage, setEarnMessage] = useState(null);
+  const syncTimerRef = useRef(null);
+
+  // Load authoritative balance from Supabase on mount
+  useEffect(() => {
+    loadCurrency().then(val => { if (val !== null) setCurrency(val); });
+  }, []);
+
+  // Persist to localStorage immediately + debounce Supabase sync
   useEffect(() => {
     try { localStorage.setItem('balda_currency', String(currency)); } catch {}
+    clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => syncCurrency(currency), 2000);
   }, [currency]);
 
   const earnCurrency = (amount, reason) => {
@@ -116,20 +142,35 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     }
   })(); }, []);
 
-  // Subscribe to room changes
+  // Always-current ref to handleRoomUpdate so the subscription never captures a stale version
+  const handleRoomUpdateRef = useRef(handleRoomUpdate);
+  useEffect(() => { handleRoomUpdateRef.current = handleRoomUpdate; });
+
+  // Subscribe to room changes + presence (disconnection detection)
   useEffect(() => {
     const channel = supabase
       .channel(`game-${roomId}`)
+      .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+        const opponentLeft = leftPresences.some(p => p.player !== myNumber);
+        if (opponentLeft && phaseRef.current !== 'gameOver') {
+          setDisconnected(true);
+          setPhase('gameOver');
+          setMessage('Соперник отключился');
+        }
+      })
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
         table: 'game_rooms',
         filter: `id=eq.${roomId}`,
       }, (payload) => {
-        const room = payload.new;
-        handleRoomUpdate(room);
+        handleRoomUpdateRef.current(payload.new);
       })
-      .subscribe();
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({ player: myNumber, joined: Date.now() });
+        }
+      });
 
     return () => { supabase.removeChannel(channel); };
   }, [roomId]);
@@ -239,23 +280,27 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
 
   const handleTimeout = async () => {
     setMessage('⏰ Время вышло!');
-    if (placedCell) {
-      const newGrid = grid.map(r => [...r]);
-      newGrid[placedCell[0]][placedCell[1]] = '';
+    // Use refs to avoid stale closure reads
+    const currentPlacedCell = placedCellRef.current;
+    const currentGrid = gridRef.current;
+    const currentScores = scoresRef.current;
+    const newPassCount = passCountRef.current + 1;
+
+    if (currentPlacedCell && currentGrid) {
+      const newGrid = currentGrid.map(r => [...r]);
+      newGrid[currentPlacedCell[0]][currentPlacedCell[1]] = '';
       setGrid(newGrid);
     }
     setPlacedCell(null);
     setPlacedLetter('');
     setSelectedPath([]);
-
-    const newPassCount = passCount + 1;
     setPassCount(newPassCount);
 
     if (newPassCount >= 2) {
       setPhase('gameOver');
       await supabase.from('game_rooms').update({
         status: 'finished',
-        scores,
+        scores: currentScores,
         last_move: { type: 'timeout', player: myNumber },
       }).eq('id', roomId);
       return;
@@ -688,11 +733,20 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
       {/* Game over */}
       {isGameOver && (
         <div className="game-over">
-          <h2>
-            {scores[myNumber - 1] > scores[opponentNumber - 1] ? '🎉 Вы победили!' :
-              scores[myNumber - 1] < scores[opponentNumber - 1] ? '😞 Соперник победил' : '🤝 Ничья!'}
-          </h2>
-          <p>{scores[myNumber - 1]} : {scores[opponentNumber - 1]}</p>
+          {disconnected ? (
+            <>
+              <h2>📵 Соперник отключился</h2>
+              <p>Игра прервана</p>
+            </>
+          ) : (
+            <>
+              <h2>
+                {scores[myNumber - 1] > scores[opponentNumber - 1] ? '🎉 Вы победили!' :
+                  scores[myNumber - 1] < scores[opponentNumber - 1] ? '😞 Соперник победил' : '🤝 Ничья!'}
+              </h2>
+              <p>{scores[myNumber - 1]} : {scores[opponentNumber - 1]}</p>
+            </>
+          )}
           <div className="game-over-actions">
             <button className="btn-play" onClick={onExit}>Лобби</button>
           </div>
