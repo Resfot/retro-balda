@@ -145,7 +145,7 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
   })(); }, []);
 
   // Always-current ref to handleRoomUpdate so the subscription never captures a stale version
-  const handleRoomUpdateRef = useRef(handleRoomUpdate);
+  const handleRoomUpdateRef = useRef(null);
   useEffect(() => { handleRoomUpdateRef.current = handleRoomUpdate; });
 
   // Subscribe to room changes
