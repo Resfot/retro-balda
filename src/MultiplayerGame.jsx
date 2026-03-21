@@ -3,8 +3,8 @@ import { supabase, getPlayerId } from './supabase';
 import { loadCurrency, syncCurrency } from './referral';
 import {
   createGrid, getRandomStartWord, hasAdjacentFilled, getValidPlacements,
-  isPathValid, getWordFromPath, validateMove, isGridFull,
-  getNeighbors, LETTERS, CATEGORY_LABELS,
+  getWordFromPath, validateMove, isGridFull,
+  LETTERS, CATEGORY_LABELS,
   calculateScore, pickRandomCategory, getWordCategory, findHint,
   getAvailableCategories
 } from './game-logic';

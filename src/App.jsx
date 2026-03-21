@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   createGrid, getRandomStartWord, hasAdjacentFilled, getValidPlacements,
-  isPathValid, getWordFromPath, validateMove, isGridFull, findAIMove,
-  getNeighbors, LETTERS, CATEGORY_LABELS,
+  getWordFromPath, validateMove, isGridFull, findAIMove,
+  LETTERS, CATEGORY_LABELS,
   getAvailableCategories, calculateScore, pickRandomCategory, getWordCategory,
   findHint
 } from './game-logic';
 import WordInfo from './WordInfo';
 import Lobby from './Lobby';
 import MultiplayerGame from './MultiplayerGame';
-import { isTelegram, hapticImpact, hapticNotification, hapticSelection, onBackButton, shareInvite, getInviteLink, getRoomCodeFromStart } from './telegram';
+import { isTelegram, hapticImpact, hapticNotification, hapticSelection, onBackButton, shareInvite, getInviteLink, getRoomCodeFromStart, buyBukvyWithStars } from './telegram';
 import { initUser, onGameComplete, getReferralStats, syncCurrency, loadCurrency } from './referral';
 import { getPlayerId } from './supabase';
 
@@ -1032,7 +1032,6 @@ export default function App() {
           )}
           {isTelegram && currency < 3 && (
             <button className="buy-bukvy-btn" onClick={async () => {
-              const { buyBukvyWithStars } = await import('./telegram');
               const bought = await buyBukvyWithStars(10, 1);
               if (bought) { setCurrency(prev => prev + 10); hapticNotification('success'); }
             }}>

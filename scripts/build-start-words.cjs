@@ -61,7 +61,11 @@ Keep words exactly as given. No markdown, no explanation.`;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       let text = (data.content?.[0]?.text ?? '').trim();
-      text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+      // Extract just the JSON array — strip markdown fences and any trailing text
+      const start = text.indexOf('[');
+      const end   = text.lastIndexOf(']');
+      if (start === -1 || end === -1) throw new Error('No JSON array found in response');
+      text = text.slice(start, end + 1);
       const ranked = JSON.parse(text);
       // Validate: only return words that were in the input
       const wordSet = new Set(words);
