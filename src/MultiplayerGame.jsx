@@ -377,7 +377,10 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     }, 1000);
 
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [isMyTurn, phase, turnTime]);
+  // Only reset timer when turn ownership changes — NOT on phase changes within
+  // the same turn (place → trace). The phase guard above prevents the interval
+  // from starting during gameOver without needing phase in the dep array.
+  }, [isMyTurn, turnTime]);
 
   // Auto-pass on timeout
   useEffect(() => {
