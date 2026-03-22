@@ -136,19 +136,12 @@ export default function GameChat({ roomId, playerId, playerName, opponentName })
     }
   }, [handleSend]);
 
-  const latestMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-
   return (
     <div className="game-chat">
       {/* Collapsed bar */}
       <div className="chat-bar" onClick={toggleExpanded}>
         <span className="chat-bar-icon">{isExpanded ? '▼' : '▲'} 💬</span>
-        <span className="chat-bar-preview">
-          {latestMessage
-            ? `${latestMessage.player_id === playerId ? 'Вы' : opponentName}: ${latestMessage.message}`
-            : 'Чат'
-          }
-        </span>
+        <span className="chat-bar-preview">Чат</span>
         {unreadCount > 0 && (
           <span className="chat-unread-badge">{unreadCount}</span>
         )}

@@ -189,10 +189,10 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
   }, [roomId]);
 
   // Heartbeat poll — recover from missed Realtime events during game
-  // Polls every 8s to check if room state diverged from local
+  // Polls every 4s to check if room state diverged from local
   useEffect(() => {
-    if (!grid) return; // don't poll before game init
     const interval = setInterval(async () => {
+      if (!gridRef.current) return; // don't poll before game init
       if (phaseRef.current === 'gameOver') return;
       const { data: room } = await supabase
         .from('game_rooms')
@@ -213,9 +213,9 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
         lastMoveRef.current = roomMoveStr;
         handleRoomUpdateRef.current(room);
       }
-    }, 8000);
+    }, 4000);
     return () => clearInterval(interval);
-  }, [roomId, grid]);
+  }, [roomId]);
 
   // Guest fallback: poll DB directly in case the Realtime subscription
   // wasn't established yet when the host broadcast the init event.
@@ -360,10 +360,9 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     }
   };
 
-  // Timer
+  // Timer — runs for both players' turns, resets when turn switches
   useEffect(() => {
-    if (turnTime <= 0 || !isMyTurn || isGameOver) return;
-    if (phase !== 'place' && phase !== 'trace') return;
+    if (turnTime <= 0 || isGameOver) return;
 
     setTimeLeft(turnTime);
     timerRef.current = setInterval(() => {
@@ -377,9 +376,7 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     }, 1000);
 
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  // Only reset timer when turn ownership changes — NOT on phase changes within
-  // the same turn (place → trace). The phase guard above prevents the interval
-  // from starting during gameOver without needing phase in the dep array.
+  // Reset timer when turn ownership changes (isMyTurn flips)
   }, [isMyTurn, turnTime]);
 
   // Auto-pass on timeout
@@ -407,12 +404,15 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     setSelectedPath([]);
     setPassCount(newPassCount);
 
+    const timeoutMove = { type: 'timeout', player: myNumber };
+    lastMoveRef.current = JSON.stringify(timeoutMove);
+
     if (newPassCount >= 2) {
       setPhase('gameOver');
       await supabase.from('game_rooms').update({
         status: 'finished',
         scores: currentScores,
-        last_move: { type: 'timeout', player: myNumber },
+        last_move: timeoutMove,
       }).eq('id', roomId);
       return;
     }
@@ -424,7 +424,7 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     await supabase.from('game_rooms').update({
       current_player: opponentNumber,
       phase: 'place',
-      last_move: { type: 'timeout', player: myNumber },
+      last_move: timeoutMove,
     }).eq('id', roomId);
   };
 
@@ -566,7 +566,22 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     setMessage(gameOver ? 'Игра окончена!' : 'Ход соперника...');
 
     // Sync to Supabase
-    await supabase.from('game_rooms').update({
+    const moveData = {
+      type: 'word',
+      player: myNumber,
+      word: result.word,
+      score: scoreInfo.score,
+      isCategory: scoreInfo.isCategory,
+      multiplier: scoreInfo.multiplier,
+      path: selectedPath.map(p => [...p]),
+      grid,
+      active_category: newCategory,
+      challenge_counters: newCounters,
+    };
+    // Update lastMoveRef immediately so heartbeat doesn't re-process our own move
+    lastMoveRef.current = JSON.stringify(moveData);
+
+    const { error } = await supabase.from('game_rooms').update({
       grid,
       current_player: gameOver ? null : opponentNumber,
       phase: gameOver ? 'gameOver' : 'place',
@@ -575,19 +590,10 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
       player_words: newPlayerWords,
       active_category: newCategory,
       status: gameOver ? 'finished' : 'playing',
-      last_move: {
-        type: 'word',
-        player: myNumber,
-        word: result.word,
-        score: scoreInfo.score,
-        isCategory: scoreInfo.isCategory,
-        multiplier: scoreInfo.multiplier,
-        path: selectedPath.map(p => [...p]),
-        grid,
-        active_category: newCategory,
-        challenge_counters: newCounters,
-      },
+      last_move: moveData,
     }).eq('id', roomId);
+
+    if (error) console.error('Failed to sync move to Supabase:', error);
   };
 
   const passTurn = async () => {
@@ -616,13 +622,16 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     const newPassCount = passCount + 1;
     setPassCount(newPassCount);
 
+    const passMove = { type: 'pass', player: myNumber, challenge_counters: newCounters };
+    lastMoveRef.current = JSON.stringify(passMove);
+
     if (newPassCount >= 2) {
       setPhase('gameOver');
       setMessage('Игра окончена! Оба спасовали');
       await supabase.from('game_rooms').update({
         status: 'finished',
         scores: currentScores,
-        last_move: { type: 'pass', player: myNumber, challenge_counters: newCounters },
+        last_move: passMove,
       }).eq('id', roomId);
       return;
     }
@@ -635,7 +644,7 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
       current_player: opponentNumber,
       phase: 'place',
       scores: currentScores,
-      last_move: { type: 'pass', player: myNumber, challenge_counters: newCounters },
+      last_move: passMove,
     }).eq('id', roomId);
   };
 
@@ -768,10 +777,10 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
 
       {/* Message + Timer */}
       <div className={`message-bar ${!isMyTurn && !isGameOver ? 'thinking' : ''}`}>
-        {message}
+        {message && message !== 'Ход соперника...' && message !== 'Ваш ход!' ? message : null}
         {currentTracedWord && <span className="traced-word"> → {currentTracedWord}</span>}
-        {turnTime > 0 && isMyTurn && (phase === 'place' || phase === 'trace') && (
-          <span className={`timer-badge ${timeLeft <= 10 ? 'timer-danger' : timeLeft <= 20 ? 'timer-warn' : ''}`}>
+        {turnTime > 0 && !isGameOver && (
+          <span className={`timer-badge ${isMyTurn && timeLeft <= 10 ? 'timer-danger' : isMyTurn && timeLeft <= 20 ? 'timer-warn' : ''}`}>
             ⏱️ {timeLeft}с
           </span>
         )}
