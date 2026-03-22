@@ -138,9 +138,10 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
 
       setGrid(newGrid);
       setMessage('Ваш ход!');
+      setUsedWords(new Set([word]));
 
-      // Save initial state to Supabase immediately — guest's fallback poll will pick it up
-      supabase.from('game_rooms').update({
+      // Save initial state to Supabase — await with retry so guest can pick it up
+      const initData = {
         grid: newGrid,
         start_word: word,
         current_player: 1,
@@ -150,9 +151,12 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
         player_words: [[], []],
         active_category: cat,
         last_move: { type: 'init', grid: newGrid, word, category: cat, rotate_at: rotateAt },
-      }).eq('id', roomId);
-
-      setUsedWords(new Set([word]));
+      };
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { error } = await supabase.from('game_rooms').update(initData).eq('id', roomId);
+        if (!error) break;
+        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      }
     }
   })(); }, []);
 
@@ -181,6 +185,29 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
   // wasn't established yet when the host broadcast the init event.
   // Supabase Realtime doesn't replay missed events, so we read directly.
   const [showRetry, setShowRetry] = useState(false);
+  const [pollKey, setPollKey] = useState(0); // increment to restart poll cycle
+
+  // Helper: check if room has init data (via last_move OR grid directly)
+  const tryApplyRoomInit = (room) => {
+    if (!room || gridRef.current) return false;
+    if (room.last_move?.type === 'init') {
+      handleRoomUpdateRef.current(room);
+      return true;
+    }
+    // Fallback: if grid exists but last_move didn't land, apply directly
+    if (room.grid && Array.isArray(room.grid) && room.grid.length > 0) {
+      setGrid(room.grid);
+      setUsedWords(new Set(room.used_words || []));
+      if (room.active_category) setActiveCategory(room.active_category);
+      setCurrentPlayer(room.current_player || 1);
+      setPhase(room.phase || 'place');
+      setScores(room.scores || [0, 0]);
+      setPlayerWords(room.player_words || [[], []]);
+      setMessage(room.current_player === myNumber ? 'Ваш ход!' : 'Ход соперника...');
+      return true;
+    }
+    return false;
+  };
 
   useEffect(() => {
     if (myNumber !== 2) return;
@@ -191,23 +218,21 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     const poll = async () => {
       if (cancelled || gridRef.current) return;
 
-      // After 10 seconds, show retry button instead of infinite spinner
-      if (Date.now() - startTime > 10000) {
+      // After 15 seconds, show retry button
+      if (Date.now() - startTime > 15000) {
         setShowRetry(true);
         return;
       }
 
       const { data: room } = await supabase
         .from('game_rooms')
-        .select('grid, last_move, used_words, active_category, scores, player_words, status')
+        .select('grid, last_move, used_words, active_category, scores, player_words, status, current_player, phase')
         .eq('id', roomId)
         .single();
 
       if (cancelled) return;
 
-      if (room?.last_move?.type === 'init' && !gridRef.current) {
-        handleRoomUpdateRef.current(room);
-      } else if (!gridRef.current) {
+      if (!tryApplyRoomInit(room)) {
         setTimeout(poll, 1000);
       }
     };
@@ -215,21 +240,11 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     // Start polling 300ms after mount
     const timer = setTimeout(poll, 300);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [roomId]);
+  }, [roomId, pollKey]);
 
-  const retryConnect = async () => {
+  const retryConnect = () => {
     setShowRetry(false);
-    const { data: room } = await supabase
-      .from('game_rooms')
-      .select('grid, last_move, used_words, active_category, scores, player_words, status')
-      .eq('id', roomId)
-      .single();
-
-    if (room?.last_move?.type === 'init' && !gridRef.current) {
-      handleRoomUpdateRef.current(room);
-    } else {
-      setShowRetry(true);
-    }
+    setPollKey(k => k + 1); // restart the full poll cycle
   };
 
   const handleRoomUpdate = (room) => {
