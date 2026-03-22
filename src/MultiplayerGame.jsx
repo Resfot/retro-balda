@@ -164,7 +164,8 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
   const handleRoomUpdateRef = useRef(null);
   useEffect(() => { handleRoomUpdateRef.current = handleRoomUpdate; });
 
-  // Subscribe to room changes
+  // Subscribe to room changes with reconnection handling
+  const lastMoveRef = useRef(null);
   useEffect(() => {
     const channel = supabase
       .channel(`game-${roomId}`)
@@ -174,12 +175,47 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
         table: 'game_rooms',
         filter: `id=eq.${roomId}`,
       }, (payload) => {
+        lastMoveRef.current = JSON.stringify(payload.new.last_move);
         handleRoomUpdateRef.current(payload.new);
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('Realtime channel error, will retry subscribe');
+          setTimeout(() => channel.subscribe(), 2000);
+        }
+      });
 
     return () => { supabase.removeChannel(channel); };
   }, [roomId]);
+
+  // Heartbeat poll — recover from missed Realtime events during game
+  // Polls every 8s to check if room state diverged from local
+  useEffect(() => {
+    if (!grid) return; // don't poll before game init
+    const interval = setInterval(async () => {
+      if (phaseRef.current === 'gameOver') return;
+      const { data: room } = await supabase
+        .from('game_rooms')
+        .select('grid, last_move, used_words, active_category, scores, player_words, status, current_player, phase')
+        .eq('id', roomId)
+        .single();
+      if (!room) return;
+
+      // If room is finished but we don't know it
+      if (room.status === 'finished' && phaseRef.current !== 'gameOver') {
+        handleRoomUpdateRef.current(room);
+        return;
+      }
+
+      // If opponent made a move we missed (last_move changed)
+      const roomMoveStr = JSON.stringify(room.last_move);
+      if (room.last_move && roomMoveStr !== lastMoveRef.current) {
+        lastMoveRef.current = roomMoveStr;
+        handleRoomUpdateRef.current(room);
+      }
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [roomId, grid]);
 
   // Guest fallback: poll DB directly in case the Realtime subscription
   // wasn't established yet when the host broadcast the init event.

@@ -37,6 +37,17 @@ export async function sendChatMessage(roomId, playerId, playerName, message, typ
   });
 }
 
+export async function fetchChatMessages(roomId) {
+  if (!supabase) return [];
+  const { data } = await supabase
+    .from('game_messages')
+    .select('*')
+    .eq('room_id', roomId)
+    .order('created_at', { ascending: true })
+    .limit(100);
+  return data || [];
+}
+
 export function subscribeToChatMessages(roomId, onMessage) {
   if (!supabase) return () => {};
   const channel = supabase

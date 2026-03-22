@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { sendChatMessage, subscribeToChatMessages } from './supabase';
+import { sendChatMessage, fetchChatMessages, subscribeToChatMessages } from './supabase';
 
 const QUICK_REACTIONS = [
   'Удачи!',
@@ -10,6 +10,7 @@ const QUICK_REACTIONS = [
 ];
 
 const RATE_LIMIT_MS = 2000;
+const POLL_INTERVAL_MS = 5000;
 
 export default function GameChat({ roomId, playerId, playerName, opponentName }) {
   const [messages, setMessages] = useState([]);
@@ -20,26 +21,63 @@ export default function GameChat({ roomId, playerId, playerName, opponentName })
   const messagesEndRef = useRef(null);
   const seenIdsRef = useRef(new Set());
   const isExpandedRef = useRef(false);
+  const pendingSendsRef = useRef(new Set()); // track optimistic message fingerprints
 
   useEffect(() => { isExpandedRef.current = isExpanded; }, [isExpanded]);
 
-  // Subscribe to chat messages
+  // Fingerprint for deduplicating optimistic vs real messages
+  const msgFingerprint = (msg) => `${msg.player_id}|${msg.message}|${msg.type}`;
+
+  const addMessage = useCallback((msg, isFromSelf) => {
+    if (seenIdsRef.current.has(msg.id)) return;
+
+    // If this is a real message matching a pending optimistic send, skip it
+    // (the optimistic version is already displayed)
+    if (!isFromSelf && msg.player_id === playerId) {
+      const fp = msgFingerprint(msg);
+      if (pendingSendsRef.current.has(fp)) {
+        pendingSendsRef.current.delete(fp);
+        seenIdsRef.current.add(msg.id);
+        return;
+      }
+    }
+
+    seenIdsRef.current.add(msg.id);
+    setMessages(prev => [...prev, msg]);
+
+    if (!isExpandedRef.current && msg.player_id !== playerId) {
+      setUnreadCount(prev => prev + 1);
+    }
+  }, [playerId]);
+
+  // Fetch existing messages on mount
+  useEffect(() => {
+    fetchChatMessages(roomId).then(msgs => {
+      msgs.forEach(msg => {
+        seenIdsRef.current.add(msg.id);
+      });
+      setMessages(msgs);
+    });
+  }, [roomId]);
+
+  // Subscribe to new chat messages via Realtime
   useEffect(() => {
     const cleanup = subscribeToChatMessages(roomId, (msg) => {
-      // Deduplicate
-      if (seenIdsRef.current.has(msg.id)) return;
-      seenIdsRef.current.add(msg.id);
-
-      setMessages(prev => [...prev, msg]);
-
-      // Increment unread if collapsed and message is from opponent
-      if (!isExpandedRef.current && msg.player_id !== playerId) {
-        setUnreadCount(prev => prev + 1);
-      }
+      addMessage(msg, false);
     });
-
     return cleanup;
-  }, [roomId, playerId]);
+  }, [roomId, addMessage]);
+
+  // Fallback poll — catches messages missed by Realtime
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const msgs = await fetchChatMessages(roomId);
+      msgs.forEach(msg => {
+        addMessage(msg, false);
+      });
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [roomId, addMessage]);
 
   // Auto-scroll when new messages arrive or panel expands
   useEffect(() => {
@@ -62,6 +100,7 @@ export default function GameChat({ roomId, playerId, playerName, opponentName })
     if (!text.trim()) return;
 
     lastSentRef.current = now;
+    const trimmed = text.trim().slice(0, 200);
 
     // Optimistic add
     const optimistic = {
@@ -69,14 +108,19 @@ export default function GameChat({ roomId, playerId, playerName, opponentName })
       room_id: roomId,
       player_id: playerId,
       player_name: playerName,
-      message: text.trim().slice(0, 200),
+      message: trimmed,
       type,
       created_at: new Date().toISOString(),
     };
     seenIdsRef.current.add(optimistic.id);
+    pendingSendsRef.current.add(msgFingerprint(optimistic));
     setMessages(prev => [...prev, optimistic]);
 
-    await sendChatMessage(roomId, playerId, playerName, text.trim(), type);
+    await sendChatMessage(roomId, playerId, playerName, trimmed, type);
+
+    // Clean up stale pending fingerprints after 10s
+    const fp = msgFingerprint(optimistic);
+    setTimeout(() => { pendingSendsRef.current.delete(fp); }, 10000);
   }, [roomId, playerId, playerName]);
 
   const handleSend = useCallback(() => {
