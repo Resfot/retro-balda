@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase, getPlayerId, getPlayerName, setPlayerName } from './supabase';
 import { isTelegram, shareGame, hapticImpact } from './telegram';
 import { CATEGORY_LABELS, getAvailableCategories } from './game-logic';
@@ -40,9 +40,20 @@ export default function Lobby({ onGameStart, onBack, wordCategories, autoJoinCod
   }, [name]);
 
   // Poll for guest joining (when host is waiting)
+  // Uses Realtime as the fast path + fallback polling every 2s
+  const gameStartedRef = useRef(false);
+
   useEffect(() => {
     if (tab !== 'waiting' || !roomId) return;
+    gameStartedRef.current = false;
 
+    const startGame = (room) => {
+      if (gameStartedRef.current) return;
+      gameStartedRef.current = true;
+      onGameStart(room, 1); // host is player 1
+    };
+
+    // Realtime subscription (fast path)
     const channel = supabase
       .channel(`room-${roomId}`)
       .on('postgres_changes', {
@@ -53,12 +64,28 @@ export default function Lobby({ onGameStart, onBack, wordCategories, autoJoinCod
       }, (payload) => {
         const room = payload.new;
         if (room.guest_id && room.status === 'playing') {
-          onGameStart(room, 1); // host is player 1
+          startGame(room);
         }
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    // Fallback poll every 2s in case Realtime misses the event
+    const pollInterval = setInterval(async () => {
+      if (gameStartedRef.current) return;
+      const { data: room } = await supabase
+        .from('game_rooms')
+        .select('*')
+        .eq('id', roomId)
+        .single();
+      if (room?.guest_id && room?.status === 'playing') {
+        startGame(room);
+      }
+    }, 2000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(pollInterval);
+    };
   }, [tab, roomId]);
 
   // Create room
