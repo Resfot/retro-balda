@@ -9,6 +9,7 @@ import {
   getAvailableCategories
 } from './game-logic';
 import WordInfo from './WordInfo';
+import GameChat from './GameChat';
 
 const CHALLENGE_TURNS = 3;
 const CHALLENGE_PENALTY = 3;
@@ -17,10 +18,18 @@ const MIXED_ROTATE_MAX = 3;
 
 const HINT_COSTS = [1, 2, 3];
 
-export default function MultiplayerGame({ room: initialRoom, playerNumber, dictionary, dictSet, wordCategories, availableCategories, onExit }) {
+export default function MultiplayerGame({ room: initialRoom, playerNumber, dictionary, dictSet, wordCategories, availableCategories, geoSet, onExit }) {
   const playerId = getPlayerId();
   const myNumber = playerNumber; // 1 or 2
   const opponentNumber = myNumber === 1 ? 2 : 1;
+
+  // Player names from room record
+  const myName = myNumber === 1
+    ? (initialRoom.host_name || 'Игрок 1')
+    : (initialRoom.guest_name || 'Игрок 2');
+  const opponentName = myNumber === 1
+    ? (initialRoom.guest_name || 'Игрок 2')
+    : (initialRoom.host_name || 'Игрок 1');
 
   // Game state
   const [grid, setGrid] = useState(null);
@@ -101,6 +110,12 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     setTimeout(() => setEarnMessage(null), 2500);
   };
 
+  // Effective dictionary: base + geo names when in geo mode
+  const effectiveDictSet = React.useMemo(
+    () => (gameMode === 'geo' && geoSet?.size > 0 ? new Set([...dictSet, ...geoSet]) : dictSet),
+    [dictSet, geoSet, gameMode]
+  );
+
   const isMyTurn = currentPlayer === myNumber;
   const isGameOver = phase === 'gameOver';
   const roomId = initialRoom.id;
@@ -124,10 +139,7 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
       setGrid(newGrid);
       setMessage('Ваш ход!');
 
-      // Delay so guest's Realtime subscription has time to connect before we broadcast init
-      await new Promise(r => setTimeout(r, 2500));
-
-      // Save initial state to Supabase
+      // Save initial state to Supabase immediately — guest's fallback poll will pick it up
       supabase.from('game_rooms').update({
         grid: newGrid,
         start_word: word,
@@ -168,13 +180,22 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
   // Guest fallback: poll DB directly in case the Realtime subscription
   // wasn't established yet when the host broadcast the init event.
   // Supabase Realtime doesn't replay missed events, so we read directly.
+  const [showRetry, setShowRetry] = useState(false);
+
   useEffect(() => {
     if (myNumber !== 2) return;
 
     let cancelled = false;
+    const startTime = Date.now();
 
     const poll = async () => {
       if (cancelled || gridRef.current) return;
+
+      // After 10 seconds, show retry button instead of infinite spinner
+      if (Date.now() - startTime > 10000) {
+        setShowRetry(true);
+        return;
+      }
 
       const { data: room } = await supabase
         .from('game_rooms')
@@ -187,14 +208,29 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
       if (room?.last_move?.type === 'init' && !gridRef.current) {
         handleRoomUpdateRef.current(room);
       } else if (!gridRef.current) {
-        setTimeout(poll, 1000); // retry every second until grid arrives
+        setTimeout(poll, 1000);
       }
     };
 
-    // Start polling 800ms after mount to let the Realtime sub establish first
-    const timer = setTimeout(poll, 800);
+    // Start polling 300ms after mount
+    const timer = setTimeout(poll, 300);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [roomId]);
+
+  const retryConnect = async () => {
+    setShowRetry(false);
+    const { data: room } = await supabase
+      .from('game_rooms')
+      .select('grid, last_move, used_words, active_category, scores, player_words, status')
+      .eq('id', roomId)
+      .single();
+
+    if (room?.last_move?.type === 'init' && !gridRef.current) {
+      handleRoomUpdateRef.current(room);
+    } else {
+      setShowRetry(true);
+    }
+  };
 
   const handleRoomUpdate = (room) => {
     const move = room.last_move;
@@ -401,13 +437,13 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
       return;
     }
 
-    const result = validateMove(grid, selectedPath, placedCell, usedWords, dictSet);
+    const result = validateMove(grid, selectedPath, placedCell, usedWords, effectiveDictSet);
     if (!result.valid) {
       setMessage(result.reason);
       return;
     }
 
-    const scoreInfo = calculateScore(result.word, wordCategories, gameMode, activeCategory);
+    const scoreInfo = calculateScore(result.word, wordCategories, gameMode, activeCategory, geoSet);
     const newScores = [...scores];
     newScores[myNumber - 1] += scoreInfo.score;
 
@@ -559,7 +595,7 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     const currentGrid = grid.map(r => [...r]);
     if (placedCell) currentGrid[placedCell[0]][placedCell[1]] = '';
 
-    const h = findHint(currentGrid, usedWords, dictSet, wordCategories, activeCategory, nextLevel);
+    const h = findHint(currentGrid, usedWords, effectiveDictSet, wordCategories, activeCategory, nextLevel, 3, geoSet);
     if (!h) { setMessage('Подсказок нет!'); return; }
 
     setCurrency(prev => prev - cost);
@@ -605,7 +641,12 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
           <div className="panel-body">
             <div className="loader">
               <div className="pixel-spinner" />
-              <p>Подключение...</p>
+              <p>Подключаемся...</p>
+              {showRetry && (
+                <button className="btn-play" onClick={retryConnect} style={{ marginTop: '12px' }}>
+                  Повторить
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -622,18 +663,19 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
         </div>
         <div className="panel-body">
       {/* Category bar */}
-      {activeCategory && gameMode !== 'classic' && (
+      {((activeCategory && gameMode !== 'classic') || gameMode === 'geo') && (
         <div className={`category-bar mode-${gameMode}`}>
           <span className="cat-mode-label">
             {gameMode === 'bonus' && '⭐'}
             {gameMode === 'mixed' && '🔀'}
             {gameMode === 'challenge' && '🔥'}
+            {gameMode === 'geo' && '🌍'}
           </span>
-          <span className="cat-active-name">{CATEGORY_LABELS[activeCategory] || activeCategory}</span>
+          <span className="cat-active-name">{gameMode === 'geo' ? 'Города и реки ×3' : (CATEGORY_LABELS[activeCategory] || activeCategory)}</span>
           {gameMode === 'challenge' && (
             <span className="challenge-counters">
-              <span className="cc-you">Вы: {challengeCounters[myNumber - 1]}/{CHALLENGE_TURNS}</span>
-              <span className="cc-bot">Они: {challengeCounters[opponentNumber - 1]}/{CHALLENGE_TURNS}</span>
+              <span className="cc-you">{myName}: {challengeCounters[myNumber - 1]}/{CHALLENGE_TURNS}</span>
+              <span className="cc-bot">{opponentName}: {challengeCounters[opponentNumber - 1]}/{CHALLENGE_TURNS}</span>
             </span>
           )}
         </div>
@@ -642,12 +684,12 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
       {/* Score bar */}
       <div className="score-bar">
         <div className={`player-score ${isMyTurn && !isGameOver ? 'active' : ''}`}>
-          <span className="player-label">Вы (П{myNumber})</span>
+          <span className="player-label">{myName}</span>
           <span className="score-value">{scores[myNumber - 1]}</span>
         </div>
         <div className="vs">VS</div>
         <div className={`player-score p2 ${!isMyTurn && !isGameOver ? 'active' : ''}`}>
-          <span className="player-label">Соперник</span>
+          <span className="player-label">{opponentName}</span>
           <span className="score-value">{scores[opponentNumber - 1]}</span>
         </div>
       </div>
@@ -661,6 +703,14 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
           <span className="currency-earn" key={Date.now()}>+{earnMessage.amount} {earnMessage.text}</span>
         )}
       </div>
+
+      {/* Chat */}
+      <GameChat
+        roomId={roomId}
+        playerId={playerId}
+        playerName={myName}
+        opponentName={opponentName}
+      />
 
       {/* Message + Timer */}
       <div className={`message-bar ${!isMyTurn && !isGameOver ? 'thinking' : ''}`}>

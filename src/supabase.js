@@ -24,3 +24,32 @@ export function getPlayerName() {
 export function setPlayerName(name) {
   localStorage.setItem('balda_player_name', name);
 }
+
+// Chat helpers
+export async function sendChatMessage(roomId, playerId, playerName, message, type = 'text') {
+  if (!supabase) return;
+  return supabase.from('game_messages').insert({
+    room_id: roomId,
+    player_id: playerId,
+    player_name: playerName,
+    message: message.slice(0, 200),
+    type,
+  });
+}
+
+export function subscribeToChatMessages(roomId, onMessage) {
+  if (!supabase) return () => {};
+  const channel = supabase
+    .channel(`chat-${roomId}`)
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'game_messages',
+      filter: `room_id=eq.${roomId}`,
+    }, (payload) => {
+      onMessage(payload.new);
+    })
+    .subscribe();
+
+  return () => { supabase.removeChannel(channel); };
+}

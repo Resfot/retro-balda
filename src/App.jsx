@@ -1263,6 +1263,7 @@ export default function App() {
         dictSet={dictSet}
         wordCategories={wordCategories}
         availableCategories={availableCategories}
+        geoSet={geoSet}
         onExit={() => {
           setMultiRoom(null);
           setMultiPlayerNumber(null);

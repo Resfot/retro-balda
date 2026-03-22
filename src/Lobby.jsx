@@ -14,6 +14,7 @@ const GAME_MODES = [
   { id: 'bonus', label: 'Бонус ×2', emoji: '⭐' },
   { id: 'mixed', label: 'Микс', emoji: '🔀' },
   { id: 'challenge', label: 'Вызов', emoji: '🔥' },
+  { id: 'geo', label: 'Гео', emoji: '🌍' },
 ];
 
 export default function Lobby({ onGameStart, onBack, wordCategories, autoJoinCode, onAutoJoinConsumed }) {
@@ -68,6 +69,7 @@ export default function Lobby({ onGameStart, onBack, wordCategories, autoJoinCod
         .from('game_rooms')
         .insert({
           host_id: playerId,
+          host_name: name.trim() || 'Игрок',
           grid_size: gridSize,
           turn_time: turnTime,
           game_mode: gameMode,
@@ -104,15 +106,18 @@ export default function Lobby({ onGameStart, onBack, wordCategories, autoJoinCod
       if (err || !room) { setError('Комната не найдена или уже занята'); return; }
       if (room.host_id === playerId) { setError('Нельзя присоединиться к своей комнате'); return; }
 
-      // Join
-      const { error: updateErr } = await supabase
+      // Join (atomic: only succeeds if room is still waiting)
+      const { data: updated, error: updateErr } = await supabase
         .from('game_rooms')
-        .update({ guest_id: playerId, status: 'playing' })
-        .eq('id', code);
+        .update({ guest_id: playerId, guest_name: name.trim() || 'Игрок', status: 'playing' })
+        .eq('id', code)
+        .eq('status', 'waiting')
+        .select()
+        .single();
 
-      if (updateErr) throw updateErr;
+      if (updateErr || !updated) { setError('Комната уже занята'); return; }
 
-      onGameStart(room, 2); // guest is player 2
+      onGameStart(updated, 2); // guest is player 2, use fresh room data
     } catch (e) {
       setError('Ошибка: ' + e.message);
     }
@@ -146,14 +151,19 @@ export default function Lobby({ onGameStart, onBack, wordCategories, autoJoinCod
 
       if (rooms && rooms.length > 0) {
         const room = rooms[0];
-        const { error: err } = await supabase
+        const { data: updated, error: err } = await supabase
           .from('game_rooms')
-          .update({ guest_id: playerId, status: 'playing' })
-          .eq('id', room.id);
+          .update({ guest_id: playerId, guest_name: name.trim() || 'Игрок', status: 'playing' })
+          .eq('id', room.id)
+          .eq('status', 'waiting')
+          .select()
+          .single();
 
-        if (err) throw err;
-        onGameStart(room, 2);
-        return;
+        if (!err && updated) {
+          onGameStart(updated, 2);
+          return;
+        }
+        // Room was taken — fall through to create a new public room
       }
 
       // No room found — create a public one and wait
@@ -161,6 +171,7 @@ export default function Lobby({ onGameStart, onBack, wordCategories, autoJoinCod
         .from('game_rooms')
         .insert({
           host_id: playerId,
+          host_name: name.trim() || 'Игрок',
           grid_size: gridSize,
           turn_time: turnTime,
           game_mode: 'classic',
