@@ -26,16 +26,16 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS word_info (
     word TEXT PRIMARY KEY,
     category TEXT,
-    definition TEXT,
+    translation TEXT,
+    explanation TEXT,
     fun_fact TEXT,
-    frequency TEXT DEFAULT 'unknown',
     created_at TEXT DEFAULT (datetime('now'))
   )
 `);
 
 const getWord = db.prepare('SELECT * FROM word_info WHERE word = ?');
 const insertWord = db.prepare(`
-  INSERT OR REPLACE INTO word_info (word, category, definition, fun_fact, frequency)
+  INSERT OR REPLACE INTO word_info (word, category, translation, explanation, fun_fact)
   VALUES (?, ?, ?, ?, ?)
 `);
 const getStats = db.prepare('SELECT COUNT(*) as total FROM word_info');
@@ -50,15 +50,19 @@ async function callClaude(word) {
     messages: [
       {
         role: 'user',
-        content: `Дай краткую информацию о русском слове "${word}". Ответь ТОЛЬКО в формате JSON без markdown:
-{
-  "definition": "краткое определение слова (1 предложение, max 15 слов)",
-  "fun_fact": "интересный факт, этимология, или необычное использование этого слова (1-2 предложения, max 30 слов)",
-  "frequency": "common|intermediate|advanced|rare"
-}
+        content: `Ты — эксперт по русскому языку и этимологии. Пользователь играет в игру "Балда" и составил слово.
 
-Частотность: common = топ-3000 слов, intermediate = 3000-10000, advanced = 10000-30000, rare = остальные.
-Факт должен быть познавательным и увлекательным — этимология, история, связь с другими языками, необычные значения.`
+Дай информацию о слове "${word}".
+
+СТРОГИЕ ПРАВИЛА:
+1. ПЕРЕВОД: Перевод слова на английский. Одно-два слова, без пояснений.
+2. ОБЪЯСНЕНИЕ: Краткое объяснение на русском, 1-2 предложения максимум. Без воды.
+3. ИНТЕРЕСНЫЙ ФАКТ: Один реальный, проверяемый факт — этимология, связь с другими языками, исторический/научный факт, или необычное применение. Не выдумывай. Не повторяй объяснение.
+
+Ответь строго в JSON:
+{"translation": "...", "explanation": "...", "fun_fact": "..."}
+
+Только JSON, без маркдауна, без комментариев.`
       }
     ]
   });
@@ -116,19 +120,19 @@ app.get('/api/word-info', async (req, res) => {
     insertWord.run(
       word,
       category,
-      info.definition || '',
-      info.fun_fact || '',
-      info.frequency || 'unknown'
+      info.translation || '',
+      info.explanation || '',
+      info.fun_fact || ''
     );
 
-    console.log(`✨ New word: "${word}" → ${info.frequency}`);
+    console.log(`✨ New word: "${word}"`);
 
     res.json({
       word,
       category,
-      definition: info.definition,
+      translation: info.translation,
+      explanation: info.explanation,
       fun_fact: info.fun_fact,
-      frequency: info.frequency,
       source: 'api',
     });
   } catch (err) {
@@ -158,8 +162,8 @@ app.post('/api/word-info/batch', async (req, res) => {
     const category = w.category || '';
     try {
       const info = await callClaude(word);
-      insertWord.run(word, category, info.definition || '', info.fun_fact || '', info.frequency || 'unknown');
-      results[word] = { word, category, definition: info.definition, fun_fact: info.fun_fact, frequency: info.frequency, source: 'api' };
+      insertWord.run(word, category, info.translation || '', info.explanation || '', info.fun_fact || '');
+      results[word] = { word, category, translation: info.translation, explanation: info.explanation, fun_fact: info.fun_fact, source: 'api' };
       console.log(`✨ Batch: "${word}"`);
     } catch (err) {
       console.error(`❌ Batch error "${word}":`, err.message);
@@ -174,8 +178,7 @@ app.post('/api/word-info/batch', async (req, res) => {
 app.get('/api/stats', (req, res) => {
   const total = getStats.get().total;
   const byCat = db.prepare('SELECT category, COUNT(*) as count FROM word_info GROUP BY category ORDER BY count DESC').all();
-  const byFreq = db.prepare('SELECT frequency, COUNT(*) as count FROM word_info GROUP BY frequency ORDER BY count DESC').all();
-  res.json({ total, byCategory: byCat, byFrequency: byFreq });
+  res.json({ total, byCategory: byCat });
 });
 
 app.listen(PORT, () => {

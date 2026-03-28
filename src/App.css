@@ -785,6 +785,7 @@ body::before {
 .wi-close:hover { color: #fff; }
 .wi-loading { display: flex; align-items: center; gap: 8px; padding: 10px; font-size: 11px; color: var(--text-dim); }
 .wi-body { padding: 8px 10px; }
+.wi-translation { font-size: 13px; color: var(--text-dim); line-height: 1.5; margin-bottom: 5px; font-style: italic; }
 .wi-definition { font-size: 12px; color: var(--text); line-height: 1.6; margin-bottom: 5px; }
 .wi-fact {
   font-size: 11px; color: var(--gold); line-height: 1.5; margin-bottom: 6px;

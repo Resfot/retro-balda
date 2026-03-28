@@ -13,9 +13,11 @@ async function callClaude(word) {
 Дай информацию о слове "${word}".
 
 СТРОГИЕ ПРАВИЛА:
-1. ОПРЕДЕЛЕНИЕ: Дай краткое, точное определение (1-2 предложения). Без воды. Если слово имеет несколько значений — дай самое распространённое.
+1. ПЕРЕВОД: Перевод слова на английский. Одно-два слова, без пояснений.
 
-2. ИНТЕРЕСНЫЙ ФАКТ: Один реальный, проверяемый факт. Это ДОЛЖЕН быть:
+2. ОБЪЯСНЕНИЕ: Краткое объяснение на русском, 1-2 предложения максимум. Без воды.
+
+3. ИНТЕРЕСНЫЙ ФАКТ: Один реальный, проверяемый факт. Это ДОЛЖЕН быть:
    - Этимология (откуда пришло слово, из какого языка, как менялось значение)
    - Или удивительная связь с другими словами (родственные слова в других языках, неочевидные однокоренные)
    - Или реальный исторический/научный факт, связанный с этим словом/понятием
@@ -25,12 +27,10 @@ async function callClaude(word) {
    - Выдумывать факты. Если не уверен — лучше дай этимологию, она всегда интересна.
    - Банальности вроде "это слово часто используется в быту"
    - Общие фразы вроде "играет важную роль в культуре"
-   - Повторять определение другими словами
-
-3. ЧАСТОТНОСТЬ: Одно слово — "Частое", "Среднее" или "Редкое"
+   - Повторять объяснение другими словами
 
 Ответь строго в JSON:
-{"definition": "...", "fun_fact": "...", "frequency": "Частое|Среднее|Редкое"}
+{"translation": "...", "explanation": "...", "fun_fact": "..."}
 
 Только JSON, без маркдауна, без комментариев.`;
 
@@ -69,9 +69,9 @@ async function callClaude(word) {
   }
 
   return {
-    definition: parsed.definition || '',
-    fun_fact:   parsed.fun_fact   || '',
-    frequency:  parsed.frequency  || 'Среднее',
+    translation: parsed.translation || '',
+    explanation: parsed.explanation || '',
+    fun_fact:    parsed.fun_fact    || '',
   };
 }
 
@@ -105,17 +105,17 @@ export default async function handler(req, res) {
     await supabase.from('word_info').upsert({
       word,
       category,
-      definition: info.definition || '',
+      translation: info.translation || '',
+      explanation: info.explanation || '',
       fun_fact: info.fun_fact || '',
-      frequency: info.frequency || 'unknown',
     });
 
     return res.json({
       word,
       category,
-      definition: info.definition,
+      translation: info.translation,
+      explanation: info.explanation,
       fun_fact: info.fun_fact,
-      frequency: info.frequency,
       source: 'api',
     });
   } catch (err) {

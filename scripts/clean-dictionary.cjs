@@ -125,6 +125,28 @@ const EXPLICIT_REMOVE = new Set([
   'это',         'якобы',
   // Typo
   'priём',       // transliteration error
+  // Remaining adverbs found in second pass
+  'быстро',      'вдвое',       'весной',      'вместо',
+  'впервые',     'громко',      'далее',       'заново',
+  'легко',       'мокро',       'помимо',      'просто',
+  'прочь',       'редко',       'сухо',        'тихо',
+  'часто',
+  // Numerals (not nouns)
+  'один',        'два',         'три',         'четыре',
+  'пять',        'шесть',       'семь',        'восемь',
+  'девять',      'десять',      'двадцать',    'тридцать',
+  'сорок',       'сто',
+  // Adjective/participle forms (NOT substantivized nouns)
+  'взбитый',     'заданный',    'покрытый',    'принятый',
+  'вязанный',    'жаренный',
+  // Gerund
+  'начиная',
+  // Pronoun
+  'вас',
+  // Not a standalone word
+  'вряд',
+  // Additional non-nouns found in review
+  'двое',        'трое',
 ]);
 
 // Patterns that indicate NON-nouns (very conservative)
