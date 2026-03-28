@@ -161,39 +161,53 @@ export default function Lobby({ onGameStart, onBack, wordCategories, autoJoinCod
     }
   }, [autoJoinCode]);
 
-  // Quick matchmaking
+  // Quick matchmaking — try to join an existing public room,
+  // or create one and keep searching until matched
+  const matchmakingRef = useRef(false);
+
+  const tryJoinPublicRoom = async () => {
+    // Only match rooms created in the last 2 minutes to avoid stale rooms
+    const cutoff = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const { data: rooms } = await supabase
+      .from('game_rooms')
+      .select('*')
+      .eq('status', 'waiting')
+      .eq('is_public', true)
+      .neq('host_id', playerId)
+      .gte('created_at', cutoff)
+      .order('created_at', { ascending: true })
+      .limit(5);
+
+    if (!rooms) return false;
+
+    // Try to join each room (atomic update prevents double-join)
+    for (const room of rooms) {
+      const { data: updated, error: err } = await supabase
+        .from('game_rooms')
+        .update({ guest_id: playerId, guest_name: name.trim() || 'Игрок', status: 'playing' })
+        .eq('id', room.id)
+        .eq('status', 'waiting')
+        .select()
+        .single();
+
+      if (!err && updated) {
+        onGameStart(updated, 2);
+        return true;
+      }
+    }
+    return false;
+  };
+
   const findMatch = async () => {
     setError('');
     setTab('matchmaking');
+    matchmakingRef.current = true;
 
     try {
-      // Look for existing public room
-      const { data: rooms } = await supabase
-        .from('game_rooms')
-        .select('*')
-        .eq('status', 'waiting')
-        .eq('is_public', true)
-        .neq('host_id', playerId)
-        .limit(1);
+      // First attempt — try to join an existing room
+      if (await tryJoinPublicRoom()) return;
 
-      if (rooms && rooms.length > 0) {
-        const room = rooms[0];
-        const { data: updated, error: err } = await supabase
-          .from('game_rooms')
-          .update({ guest_id: playerId, guest_name: name.trim() || 'Игрок', status: 'playing' })
-          .eq('id', room.id)
-          .eq('status', 'waiting')
-          .select()
-          .single();
-
-        if (!err && updated) {
-          onGameStart(updated, 2);
-          return;
-        }
-        // Room was taken — fall through to create a new public room
-      }
-
-      // No room found — create a public one and wait
+      // No room found — create a public one
       const { data, error: err } = await supabase
         .from('game_rooms')
         .insert({
@@ -210,15 +224,70 @@ export default function Lobby({ onGameStart, onBack, wordCategories, autoJoinCod
 
       if (err) throw err;
       setRoomId(data.id);
-      setTab('waiting');
+      // Stay on 'matchmaking' tab — the matchmaking poll effect handles the rest
     } catch (e) {
       setError('Ошибка: ' + e.message);
       setTab('main');
+      matchmakingRef.current = false;
     }
   };
 
-  // Cancel waiting
+  // Matchmaking poll — while waiting as host, also keep searching for other public rooms
+  // (handles the case where two players both create rooms simultaneously)
+  useEffect(() => {
+    if (tab !== 'matchmaking' || !roomId) return;
+    matchmakingRef.current = true;
+
+    const channel = supabase
+      .channel(`match-${roomId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'game_rooms',
+        filter: `id=eq.${roomId}`,
+      }, (payload) => {
+        const room = payload.new;
+        if (room.guest_id && room.status === 'playing' && matchmakingRef.current) {
+          matchmakingRef.current = false;
+          onGameStart(room, 1);
+        }
+      })
+      .subscribe();
+
+    const poll = setInterval(async () => {
+      if (!matchmakingRef.current) return;
+
+      // Check if someone joined our room
+      const { data: myRoom } = await supabase
+        .from('game_rooms')
+        .select('*')
+        .eq('id', roomId)
+        .single();
+
+      if (myRoom?.guest_id && myRoom?.status === 'playing') {
+        matchmakingRef.current = false;
+        onGameStart(myRoom, 1);
+        return;
+      }
+
+      // Also search for other public rooms (opponent may have also created one)
+      if (await tryJoinPublicRoom()) {
+        // We joined another room as guest — delete our orphaned room
+        matchmakingRef.current = false;
+        await supabase.from('game_rooms').delete().eq('id', roomId).eq('status', 'waiting');
+      }
+    }, 3000);
+
+    return () => {
+      matchmakingRef.current = false;
+      supabase.removeChannel(channel);
+      clearInterval(poll);
+    };
+  }, [tab, roomId]);
+
+  // Cancel waiting / matchmaking
   const cancelWaiting = async () => {
+    matchmakingRef.current = false;
     if (roomId) {
       await supabase.from('game_rooms').delete().eq('id', roomId);
     }

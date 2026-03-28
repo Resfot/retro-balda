@@ -67,6 +67,7 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
   // Timer
   const [timeLeft, setTimeLeft] = useState(turnTime);
   const timerRef = useRef(null);
+  const opponentGraceRef = useRef(null); // grace timer for opponent disconnect
 
   // Refs to fix stale-closure bugs in async callbacks
   const passCountRef = useRef(0);
@@ -385,6 +386,73 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
       handleTimeout();
     }
   }, [timeLeft]);
+
+  // Opponent disconnect detection: when their timer expires locally,
+  // wait a grace period then force-pass on their behalf
+  useEffect(() => {
+    // Clear any existing grace timer
+    if (opponentGraceRef.current) {
+      clearTimeout(opponentGraceRef.current);
+      opponentGraceRef.current = null;
+    }
+
+    // Only activate when it's opponent's turn and timer ran out
+    if (turnTime > 0 && timeLeft === 0 && !isMyTurn && !isGameOver) {
+      opponentGraceRef.current = setTimeout(async () => {
+        // Double-check the game state via refs (opponent might have moved during grace)
+        if (phaseRef.current === 'gameOver') return;
+
+        // Check DB one more time — maybe their move just didn't arrive via Realtime
+        const { data: room } = await supabase
+          .from('game_rooms')
+          .select('last_move, status, current_player')
+          .eq('id', roomId)
+          .single();
+
+        if (!room) return;
+        if (room.status === 'finished') {
+          handleRoomUpdateRef.current(room);
+          return;
+        }
+        // If opponent already moved (turn changed), skip
+        if (room.current_player === myNumber) return;
+
+        // Opponent is truly gone — force-pass on their behalf
+        const newPassCount = passCountRef.current + 1;
+        setPassCount(newPassCount);
+
+        const timeoutMove = { type: 'timeout', player: opponentNumber };
+        lastMoveRef.current = JSON.stringify(timeoutMove);
+
+        if (newPassCount >= 2) {
+          setDisconnected(true);
+          setPhase('gameOver');
+          setMessage('📵 Соперник отключился');
+          await supabase.from('game_rooms').update({
+            status: 'finished',
+            scores: scoresRef.current,
+            last_move: timeoutMove,
+          }).eq('id', roomId);
+        } else {
+          setCurrentPlayer(myNumber);
+          setPhase('place');
+          setMessage('⏰ У соперника вышло время. Ваш ход!');
+          await supabase.from('game_rooms').update({
+            current_player: myNumber,
+            phase: 'place',
+            last_move: timeoutMove,
+          }).eq('id', roomId);
+        }
+      }, 10000); // 10 second grace period
+    }
+
+    return () => {
+      if (opponentGraceRef.current) {
+        clearTimeout(opponentGraceRef.current);
+        opponentGraceRef.current = null;
+      }
+    };
+  }, [timeLeft, isMyTurn, isGameOver]);
 
   const handleTimeout = async () => {
     setMessage('⏰ Время вышло!');
