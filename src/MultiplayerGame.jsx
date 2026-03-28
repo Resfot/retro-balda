@@ -340,18 +340,9 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     }
 
     if (move.type === 'timeout' && move.player !== myNumber) {
-      setPassCount(prev => {
-        const newCount = prev + 1;
-        if (newCount >= 2) {
-          setPhase('gameOver');
-          setMessage('Игра окончена!');
-        } else {
-          setCurrentPlayer(myNumber);
-          setPhase('place');
-          setMessage('⏰ У соперника вышло время. Ваш ход!');
-        }
-        return newCount;
-      });
+      setDisconnected(true);
+      setPhase('gameOver');
+      setMessage('📵 Соперник отключился');
       if (room.scores) setScores(room.scores);
     }
 
@@ -417,33 +408,19 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
         // If opponent already moved (turn changed), skip
         if (room.current_player === myNumber) return;
 
-        // Opponent is truly gone — force-pass on their behalf
-        const newPassCount = passCountRef.current + 1;
-        setPassCount(newPassCount);
-
+        // Opponent is truly gone — end the game immediately
         const timeoutMove = { type: 'timeout', player: opponentNumber };
         lastMoveRef.current = JSON.stringify(timeoutMove);
 
-        if (newPassCount >= 2) {
-          setDisconnected(true);
-          setPhase('gameOver');
-          setMessage('📵 Соперник отключился');
-          await supabase.from('game_rooms').update({
-            status: 'finished',
-            scores: scoresRef.current,
-            last_move: timeoutMove,
-          }).eq('id', roomId);
-        } else {
-          setCurrentPlayer(myNumber);
-          setPhase('place');
-          setMessage('⏰ У соперника вышло время. Ваш ход!');
-          await supabase.from('game_rooms').update({
-            current_player: myNumber,
-            phase: 'place',
-            last_move: timeoutMove,
-          }).eq('id', roomId);
-        }
-      }, 10000); // 10 second grace period
+        setDisconnected(true);
+        setPhase('gameOver');
+        setMessage('📵 Соперник отключился');
+        await supabase.from('game_rooms').update({
+          status: 'finished',
+          scores: scoresRef.current,
+          last_move: timeoutMove,
+        }).eq('id', roomId);
+      }, 5000); // 5 second grace period
     }
 
     return () => {

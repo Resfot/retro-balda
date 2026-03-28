@@ -95,20 +95,49 @@ export default async function handler(req, res) {
       .single();
 
     if (cached) {
-      return res.json({ ...cached, source: 'cache' });
+      // Map old schema (definition/frequency) to new (translation/explanation)
+      const result = {
+        word: cached.word,
+        category: cached.category || '',
+        translation: cached.translation || '',
+        explanation: cached.explanation || cached.definition || '',
+        fun_fact: cached.fun_fact || '',
+        source: 'cache',
+      };
+      // If cached entry uses old schema, re-fetch from Claude for full data
+      if (!cached.translation && !cached.explanation && cached.definition) {
+        // Return old data now but don't block — let next request get fresh data
+        return res.json(result);
+      }
+      // If cached entry has no useful content at all, skip cache and re-fetch
+      if (!result.translation && !result.explanation && !result.fun_fact) {
+        // Fall through to Claude call below
+      } else {
+        return res.json(result);
+      }
     }
 
     // Call Claude
     const info = await callClaude(word);
 
-    // Save to Supabase
-    await supabase.from('word_info').upsert({
+    // Save to Supabase — try new schema, fall back to old columns
+    const { error: upsertErr } = await supabase.from('word_info').upsert({
       word,
       category,
       translation: info.translation || '',
       explanation: info.explanation || '',
       fun_fact: info.fun_fact || '',
     });
+    if (upsertErr) {
+      // Fallback: table may still have old schema (definition column)
+      await supabase.from('word_info').upsert({
+        word,
+        category,
+        definition: info.explanation || '',
+        fun_fact: info.fun_fact || '',
+        frequency: 'Среднее',
+      }).catch(() => {});
+    }
 
     return res.json({
       word,
