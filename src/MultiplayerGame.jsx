@@ -340,9 +340,16 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     }
 
     if (move.type === 'timeout' && move.player !== myNumber) {
-      setDisconnected(true);
-      setPhase('gameOver');
-      setMessage('📵 Соперник отключился');
+      if (room.status === 'finished') {
+        setDisconnected(true);
+        setPhase('gameOver');
+        setMessage('📵 Соперник отключился');
+      } else {
+        setPassCount(prev => prev + 1);
+        setCurrentPlayer(myNumber);
+        setPhase('place');
+        setMessage('⏰ У соперника вышло время. Ваш ход!');
+      }
       if (room.scores) setScores(room.scores);
     }
 
@@ -352,7 +359,8 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     }
   };
 
-  // Timer — runs for both players' turns, resets when turn switches
+  // Timer — runs for both players' turns, resets when currentPlayer changes
+  // Using currentPlayer (not isMyTurn) to avoid phantom resets from re-renders
   useEffect(() => {
     if (turnTime <= 0 || isGameOver) return;
 
@@ -368,8 +376,7 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
     }, 1000);
 
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  // Reset timer when turn ownership changes (isMyTurn flips)
-  }, [isMyTurn, turnTime]);
+  }, [currentPlayer, turnTime, isGameOver]);
 
   // Auto-pass on timeout
   useEffect(() => {
@@ -408,18 +415,34 @@ export default function MultiplayerGame({ room: initialRoom, playerNumber, dicti
         // If opponent already moved (turn changed), skip
         if (room.current_player === myNumber) return;
 
-        // Opponent is truly gone — end the game immediately
+        // Opponent didn't move in time — force-pass on their behalf
+        const newPassCount = passCountRef.current + 1;
+        setPassCount(newPassCount);
+
         const timeoutMove = { type: 'timeout', player: opponentNumber };
         lastMoveRef.current = JSON.stringify(timeoutMove);
 
-        setDisconnected(true);
-        setPhase('gameOver');
-        setMessage('📵 Соперник отключился');
-        await supabase.from('game_rooms').update({
-          status: 'finished',
-          scores: scoresRef.current,
-          last_move: timeoutMove,
-        }).eq('id', roomId);
+        if (newPassCount >= 2) {
+          // Two consecutive timeouts — opponent is gone
+          setDisconnected(true);
+          setPhase('gameOver');
+          setMessage('📵 Соперник отключился');
+          await supabase.from('game_rooms').update({
+            status: 'finished',
+            scores: scoresRef.current,
+            last_move: timeoutMove,
+          }).eq('id', roomId);
+        } else {
+          // First timeout — just pass the turn
+          setCurrentPlayer(myNumber);
+          setPhase('place');
+          setMessage('⏰ У соперника вышло время. Ваш ход!');
+          await supabase.from('game_rooms').update({
+            current_player: myNumber,
+            phase: 'place',
+            last_move: timeoutMove,
+          }).eq('id', roomId);
+        }
       }, 5000); // 5 second grace period
     }
 
